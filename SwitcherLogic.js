@@ -77,3 +77,28 @@ function groupIndex(grouped, address) {
   }
   return 0
 }
+
+function normalizeMode(value) {
+  var mode = String(value || "").toLowerCase()
+  return mode === "icons" || mode === "flip" || mode === "grid" ? mode : "grid"
+}
+
+function gridColumns(count, availableWidth) {
+  var columns = count <= 1 ? 1 : count <= 4 ? 2 : count <= 6 ? 3 : 4
+  if (Number(availableWidth) < 620) return Math.min(columns, 2)
+  if (Number(availableWidth) < 900) return Math.min(columns, 3)
+  return columns
+}
+
+function gridMove(index, direction, length, columns) {
+  if (length <= 0) return -1
+  var step = direction === "up" ? -columns
+    : direction === "down" ? columns
+    : direction === "left" ? -1 : 1
+  return wrapIndex(index + step, length)
+}
+
+function pageStart(index, pageSize) {
+  if (index < 0 || pageSize <= 0) return 0
+  return Math.floor(index / pageSize) * pageSize
+}

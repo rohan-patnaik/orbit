@@ -21,6 +21,7 @@ Item {
   property point initialPointerPosition: Qt.point(-1, -1)
   property var windows: []
   property int selectedIndex: 0
+  property string mode: "grid"
   property int snapshotWorkspaceId: -1
   property string snapshotMonitorName: ""
   property int snapshotMonitorId: -1
@@ -210,6 +211,18 @@ Item {
     watchdog.restart()
   }
 
+  function navigate(direction) {
+    if (root.mode !== "grid") {
+      root.cycle(direction === "left" || direction === "up" ? -1 : 1)
+      return
+    }
+    const firstIndex = Logic.pageStart(root.selectedIndex, 12)
+    const pageCount = Math.min(12, root.windows.length - firstIndex)
+    const availableWidth = root.targetScreen ? Number(root.targetScreen.width) - Style.space(96) : Style.space(1200)
+    const columns = Logic.gridColumns(pageCount, availableWidth)
+    root.select(Logic.gridMove(root.selectedIndex, direction, root.windows.length, columns))
+  }
+
   function finish(activate) {
     if (!root.opened)
       return
@@ -385,8 +398,8 @@ Item {
         id: switcherCard
 
         anchors.centerIn: parent
-        width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), iconsView.implicitWidth + Style.space(40)))
-        height: iconsView.implicitHeight + Style.space(92)
+        width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
+        height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(104))
         radius: Style.cornerRadius * 2
         color: Color.menu.background
         border.width: 1
@@ -397,10 +410,20 @@ Item {
           root.sawKeyEvent = true
           if (event.key === Qt.Key_Escape) {
             root.cancel()
-          } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Right || event.key === Qt.Key_Down || event.key === Qt.Key_Q) {
+          } else if (event.key === Qt.Key_Q) {
             root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
-          } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Left || event.key === Qt.Key_Up) {
+          } else if (event.key === Qt.Key_Tab) {
+            root.navigate(event.modifiers & Qt.ShiftModifier ? "left" : "right")
+          } else if (event.key === Qt.Key_Backtab) {
             root.cycle(-1)
+          } else if (event.key === Qt.Key_Right) {
+            root.navigate("right")
+          } else if (event.key === Qt.Key_Left) {
+            root.navigate("left")
+          } else if (event.key === Qt.Key_Down) {
+            root.navigate("down")
+          } else if (event.key === Qt.Key_Up) {
+            root.navigate("up")
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
             root.accept()
           } else {
@@ -422,24 +445,52 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: Style.space(18)
           anchors.horizontalCenter: parent.horizontalCenter
-          text: "Windows"
+          text: "Windows · " + (root.mode === "grid" ? "Grid" : "Icons")
           color: Color.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
           font.bold: true
         }
 
-        IconsView {
-          id: iconsView
+        Loader {
+          id: viewLoader
+
           anchors.centerIn: parent
-          maximumWidth: panel.width - Style.space(96)
-          windows: root.windows
-          selectedIndex: root.selectedIndex
-          hoverArmed: root.hoverArmed
-          onSelectRequested: index => root.select(index)
-          onActivateRequested: index => {
-            root.select(index)
-            root.accept()
+          width: item ? item.implicitWidth : 0
+          height: item ? item.implicitHeight : 0
+          sourceComponent: root.mode === "grid" ? gridViewComponent : iconsViewComponent
+        }
+
+        Component {
+          id: iconsViewComponent
+
+          IconsView {
+            maximumWidth: panel.width - Style.space(96)
+            windows: root.windows
+            selectedIndex: root.selectedIndex
+            hoverArmed: root.hoverArmed
+            onSelectRequested: index => root.select(index)
+            onActivateRequested: index => {
+              root.select(index)
+              root.accept()
+            }
+          }
+        }
+
+        Component {
+          id: gridViewComponent
+
+          GridView {
+            maximumWidth: panel.width - Style.space(96)
+            maximumHeight: panel.height - Style.space(190)
+            windows: root.windows
+            selectedIndex: root.selectedIndex
+            hoverArmed: root.hoverArmed
+            onSelectRequested: index => root.select(index)
+            onActivateRequested: index => {
+              root.select(index)
+              root.accept()
+            }
           }
         }
 

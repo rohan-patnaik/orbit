@@ -53,3 +53,19 @@ test("groupIndex returns a one-based group position", () => {
   assert.equal(logic.groupIndex(["0x1", "0x2"], "0x2"), 2);
   assert.equal(logic.groupIndex([], "0x2"), 0);
 });
+
+test("modes normalize to the grid default", () => {
+  assert.equal(logic.normalizeMode("icons"), "icons");
+  assert.equal(logic.normalizeMode("flip"), "flip");
+  assert.equal(logic.normalizeMode("GRID"), "grid");
+  assert.equal(logic.normalizeMode("unknown"), "grid");
+});
+
+test("grid geometry is bounded and navigation wraps", () => {
+  assert.equal(logic.gridColumns(3, 1200), 2);
+  assert.equal(logic.gridColumns(8, 1200), 4);
+  assert.equal(logic.gridColumns(8, 600), 2);
+  assert.equal(logic.gridMove(1, "down", 6, 3), 4);
+  assert.equal(logic.gridMove(0, "up", 6, 3), 3);
+  assert.equal(logic.pageStart(13, 12), 12);
+});
