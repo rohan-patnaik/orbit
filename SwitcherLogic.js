@@ -83,6 +83,16 @@ function normalizeMode(value) {
   return mode === "icons" || mode === "flip" || mode === "grid" ? mode : "grid"
 }
 
+function modeFromPluginEntries(entries, pluginId) {
+  if (!Array.isArray(entries)) return "grid"
+  var id = String(pluginId || "")
+  for (var i = 0; i < entries.length; i++) {
+    if (entries[i] && String(entries[i].id || "") === id)
+      return normalizeMode(entries[i].mode)
+  }
+  return "grid"
+}
+
 function gridColumns(count, availableWidth) {
   var columns = count <= 1 ? 1 : count <= 4 ? 2 : count <= 6 ? 3 : 4
   if (Number(availableWidth) < 620) return Math.min(columns, 2)

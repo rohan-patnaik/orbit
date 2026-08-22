@@ -61,6 +61,16 @@ test("modes normalize to the grid default", () => {
   assert.equal(logic.normalizeMode("unknown"), "grid");
 });
 
+test("persisted mode comes from the matching plugin entry", () => {
+  const entries = [
+    { id: "another.plugin", mode: "icons" },
+    { id: "io.github.rohan-patnaik.window-switcher", mode: "flip" }
+  ];
+  assert.equal(logic.modeFromPluginEntries(entries, "io.github.rohan-patnaik.window-switcher"), "flip");
+  assert.equal(logic.modeFromPluginEntries([{ id: "io.github.rohan-patnaik.window-switcher", mode: "invalid" }], "io.github.rohan-patnaik.window-switcher"), "grid");
+  assert.equal(logic.modeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "grid");
+});
+
 test("grid geometry is bounded and navigation wraps", () => {
   assert.equal(logic.gridColumns(3, 1200), 2);
   assert.equal(logic.gridColumns(8, 1200), 4);

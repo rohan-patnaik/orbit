@@ -140,6 +140,7 @@ Item {
   }
 
   function startSwitcher(activateOnRelease) {
+    root.mode = root.configuredMode()
     Hyprland.refreshToplevels()
     const nextWindows = root.snapshotCurrentWindows()
     if (nextWindows.length < 2)
@@ -171,37 +172,25 @@ Item {
   }
 
   function setMode(value) {
-    root.mode = Logic.normalizeMode(value)
+    const nextMode = Logic.normalizeMode(value)
+    root.mode = nextMode
+    if (root.shell && typeof root.shell.updateEntryInline === "function") {
+      root.shell.updateEntryInline(root.pluginId, {
+        id: root.pluginId,
+        mode: nextMode
+      })
+    }
     return root.mode
   }
 
-  function debugState(_argument) {
-    const raw = []
-    const toplevels = Hyprland.toplevels.values || []
-    for (const toplevel of toplevels) {
-      const ipc = toplevel.lastIpcObject || {}
-      raw.push({
-        address: String(toplevel.address || ""),
-        title: String(toplevel.title || ""),
-        workspaceId: toplevel.workspace ? Number(toplevel.workspace.id) : -1,
-        monitorName: toplevel.monitor ? String(toplevel.monitor.name || "") : "",
-        mapped: ipc.mapped,
-        pinned: ipc.pinned,
-        applicationClass: ipc.class,
-        hasWaylandHandle: !!toplevel.wayland
-      })
-    }
-    return JSON.stringify({
-      focusedWorkspaceId: Hyprland.focusedWorkspace ? Number(Hyprland.focusedWorkspace.id) : -1,
-      focusedMonitorName: Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name || "") : "",
-      raw: raw,
-      snapshot: root.snapshotCurrentWindows().map(window => ({
-            address: window.address,
-            label: window.label,
-            title: window.title
-          })),
-      opened: root.opened
-    })
+  function configuredMode() {
+    const config = root.shell ? root.shell.shellConfig : null
+    return Logic.modeFromPluginEntries(config ? config.plugins : null, root.pluginId)
+  }
+
+  onShellChanged: {
+    if (root.shell && !root.opened)
+      root.mode = root.configuredMode()
   }
 
   function cycle(step) {
@@ -404,7 +393,7 @@ Item {
 
         anchors.centerIn: parent
         width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
-        height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(104))
+        height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
         radius: Style.cornerRadius * 2
         color: Color.menu.background
         border.width: 1
@@ -520,6 +509,14 @@ Item {
               root.accept()
             }
           }
+        }
+
+        ModePicker {
+          anchors.bottom: parent.bottom
+          anchors.bottomMargin: Style.space(39)
+          anchors.horizontalCenter: parent.horizontalCenter
+          currentMode: root.mode
+          onModeRequested: mode => root.setMode(mode)
         }
 
         Text {
