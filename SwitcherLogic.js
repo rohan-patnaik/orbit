@@ -102,3 +102,20 @@ function pageStart(index, pageSize) {
   if (index < 0 || pageSize <= 0) return 0
   return Math.floor(index / pageSize) * pageSize
 }
+
+function flipEntries(rows, selectedIndex, maximumVisible) {
+  if (!rows || rows.length === 0 || maximumVisible <= 0) return []
+  var count = Math.min(rows.length, maximumVisible)
+  var before = Math.floor((count - 1) / 2)
+  var after = count - before - 1
+  var entries = []
+  for (var offset = -before; offset <= after; offset++) {
+    var index = wrapIndex(selectedIndex + offset, rows.length)
+    entries.push({
+      windowData: rows[index],
+      windowIndex: index,
+      offset: offset
+    })
+  }
+  return entries
+}

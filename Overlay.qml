@@ -170,6 +170,11 @@ Item {
     root.cancel()
   }
 
+  function setMode(value) {
+    root.mode = Logic.normalizeMode(value)
+    return root.mode
+  }
+
   function debugState(_argument) {
     const raw = []
     const toplevels = Hyprland.toplevels.values || []
@@ -424,6 +429,12 @@ Item {
             root.navigate("down")
           } else if (event.key === Qt.Key_Up) {
             root.navigate("up")
+          } else if (event.key === Qt.Key_1) {
+            root.setMode("icons")
+          } else if (event.key === Qt.Key_2) {
+            root.setMode("flip")
+          } else if (event.key === Qt.Key_3) {
+            root.setMode("grid")
           } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
             root.accept()
           } else {
@@ -445,7 +456,7 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: Style.space(18)
           anchors.horizontalCenter: parent.horizontalCenter
-          text: "Windows · " + (root.mode === "grid" ? "Grid" : "Icons")
+          text: "Windows · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
           color: Color.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
@@ -458,7 +469,7 @@ Item {
           anchors.centerIn: parent
           width: item ? item.implicitWidth : 0
           height: item ? item.implicitHeight : 0
-          sourceComponent: root.mode === "grid" ? gridViewComponent : iconsViewComponent
+          sourceComponent: root.mode === "grid" ? gridViewComponent : root.mode === "flip" ? flipViewComponent : iconsViewComponent
         }
 
         Component {
@@ -481,6 +492,23 @@ Item {
           id: gridViewComponent
 
           GridView {
+            maximumWidth: panel.width - Style.space(96)
+            maximumHeight: panel.height - Style.space(190)
+            windows: root.windows
+            selectedIndex: root.selectedIndex
+            hoverArmed: root.hoverArmed
+            onSelectRequested: index => root.select(index)
+            onActivateRequested: index => {
+              root.select(index)
+              root.accept()
+            }
+          }
+        }
+
+        Component {
+          id: flipViewComponent
+
+          FlipView {
             maximumWidth: panel.width - Style.space(96)
             maximumHeight: panel.height - Style.space(190)
             windows: root.windows

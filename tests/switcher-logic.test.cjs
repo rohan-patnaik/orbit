@@ -69,3 +69,12 @@ test("grid geometry is bounded and navigation wraps", () => {
   assert.equal(logic.gridMove(0, "up", 6, 3), 3);
   assert.equal(logic.pageStart(13, 12), 12);
 });
+
+test("flip mode instantiates at most seven unique neighboring windows", () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({ address: `0x${index + 1}` }));
+  const entries = logic.flipEntries(rows, 0, 7);
+  assert.equal(entries.length, 7);
+  assert.deepEqual(Array.from(entries, entry => entry.offset), [-3, -2, -1, 0, 1, 2, 3]);
+  assert.equal(new Set(Array.from(entries, entry => entry.windowIndex)).size, 7);
+  assert.equal(entries.find(entry => entry.offset === 0).windowIndex, 0);
+});
