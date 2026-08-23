@@ -60,8 +60,9 @@ function decorateDuplicateLabels(rows) {
   })
 }
 
-function initialSelection(rows) {
-  return rows.length > 1 ? 1 : 0
+function initialSelection(rows, direction) {
+  if (rows.length <= 1) return 0
+  return Number(direction) < 0 ? rows.length - 1 : 1
 }
 
 function wrapIndex(index, length) {

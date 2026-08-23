@@ -9,6 +9,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "u
 test("manifest declares a persistent overlay", () => {
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.id, "io.github.rohan-patnaik.window-switcher");
+  assert.equal(manifest.name, "Orbit");
   assert.equal(manifest.version, "0.1.0");
   assert.deepEqual(manifest.kinds, ["overlay"]);
   assert.equal(manifest.keepLoaded, true);

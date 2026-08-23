@@ -16,6 +16,7 @@ Item {
   property var manifest: null
   property bool opened: false
   property bool releaseToActivate: false
+  property string releaseModifier: ""
   property bool sawKeyEvent: false
   property bool hoverArmed: false
   property point initialPointerPosition: Qt.point(-1, -1)
@@ -139,15 +140,16 @@ Item {
     return Logic.decorateDuplicateLabels(Logic.sortByRecency(rows))
   }
 
-  function startSwitcher(activateOnRelease) {
+  function startSwitcher(activateOnRelease, modifier, direction) {
     root.mode = root.configuredMode()
     Hyprland.refreshToplevels()
     const nextWindows = root.snapshotCurrentWindows()
     if (nextWindows.length < 2)
       return
     root.windows = nextWindows
-    root.selectedIndex = Logic.initialSelection(nextWindows)
+    root.selectedIndex = Logic.initialSelection(nextWindows, direction)
     root.releaseToActivate = activateOnRelease
+    root.releaseModifier = activateOnRelease ? String(modifier || "") : ""
     root.sawKeyEvent = false
     root.hoverArmed = false
     root.initialPointerPosition = Qt.point(-1, -1)
@@ -164,7 +166,8 @@ Item {
         console.warn("window-switcher: invalid invocation payload:", error)
       }
     }
-    root.startSwitcher(payload.action === "next")
+    const action = String(payload.action || "show")
+    root.startSwitcher(action === "next" || action === "previous", String(payload.modifier || ""), action === "previous" ? -1 : 1)
   }
 
   function close() {
@@ -198,6 +201,21 @@ Item {
     watchdog.restart()
   }
 
+  function invokeShortcut(step) {
+    if (root.opened)
+      root.cycle(step)
+    else
+      root.startSwitcher(true, "alt", step)
+  }
+
+  function releaseModifierExpression() {
+    if (root.releaseModifier === "alt")
+      return 'error(tostring(hl.is_key_down("Alt_L") or hl.is_key_down("Alt_R")))'
+    if (root.releaseModifier === "super")
+      return 'error(tostring(hl.is_key_down("Super_L") or hl.is_key_down("Super_R")))'
+    return "error(false)"
+  }
+
   function select(index) {
     if (index < 0 || index >= root.windows.length)
       return
@@ -223,6 +241,7 @@ Item {
     const selected = activate && root.selectedIndex >= 0 ? root.windows[root.selectedIndex] : null
     watchdog.stop()
     root.releaseToActivate = false
+    root.releaseModifier = ""
     root.opened = false
     if (!selected)
       return
@@ -274,14 +293,17 @@ Item {
   GlobalShortcut {
     appid: "omarchy-window-switcher"
     name: "next"
-    description: "Cycle through current-workspace windows"
+    description: "Cycle forward through current-workspace windows"
 
-    onPressed: {
-      if (root.opened)
-        root.cycle(1)
-      else
-        root.startSwitcher(true)
-    }
+    onPressed: root.invokeShortcut(1)
+  }
+
+  GlobalShortcut {
+    appid: "omarchy-window-switcher"
+    name: "previous"
+    description: "Cycle backward through current-workspace windows"
+
+    onPressed: root.invokeShortcut(-1)
   }
 
   Connections {
@@ -361,7 +383,7 @@ Item {
 
       Process {
         id: modifierCheck
-        command: ["hyprctl", "eval", 'error(tostring(hl.is_key_down("Super_L") or hl.is_key_down("Super_R")))']
+        command: ["hyprctl", "eval", root.releaseModifierExpression()]
         stdout: StdioCollector {
           onStreamFinished: {
             if (!root.opened || !root.releaseToActivate || root.sawKeyEvent)
@@ -435,7 +457,9 @@ Item {
         Keys.onReleased: event => {
           root.sawKeyEvent = true
           const superReleased = event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R
-          if (root.releaseToActivate && superReleased)
+          const altReleased = event.key === Qt.Key_Alt
+          const modifierReleased = root.releaseModifier === "alt" ? altReleased : root.releaseModifier === "super" && superReleased
+          if (root.releaseToActivate && modifierReleased)
             root.accept()
           event.accepted = true
         }
@@ -445,7 +469,7 @@ Item {
           anchors.top: parent.top
           anchors.topMargin: Style.space(18)
           anchors.horizontalCenter: parent.horizontalCenter
-          text: "Windows · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
+          text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
           color: Color.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body

@@ -31,7 +31,8 @@ test("windows are sorted by focus history", () => {
     { address: "0x2", focusHistoryId: 1 }
   ]);
   assert.deepEqual(Array.from(rows, row => row.address), ["0x1", "0x2", "0x3"]);
-  assert.equal(logic.initialSelection(rows), 1);
+  assert.equal(logic.initialSelection(rows, 1), 1);
+  assert.equal(logic.initialSelection(rows, -1), 2);
 });
 
 test("duplicate application labels receive stable ordinals", () => {

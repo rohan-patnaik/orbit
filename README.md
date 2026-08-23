@@ -1,6 +1,6 @@
-# Omarchy Window Switcher
+# Omarchy Orbit
 
-A native Omarchy Quattro overlay for switching between windows visible in the
+Orbit is a native Omarchy Quattro overlay for switching between windows visible in the
 current workspace. Separate windows from the same application remain separate
 entries. Browser tabs are outside the plugin's scope.
 
@@ -25,13 +25,13 @@ network. A window's application icon is shown if its preview is unavailable.
 Install and enable the plugin:
 
 ```bash
-omarchy plugin add https://github.com/rohan-patnaik/omarchy-window-switcher.git --enable
+omarchy plugin add https://github.com/rohan-patnaik/orbit.git --enable
 ```
 
 Back up `~/.config/hypr/bindings.lua`, then add this guarded include to it:
 
 ```lua
--- Omarchy Window Switcher (safe if the plugin is unavailable).
+-- Orbit (safe if the plugin is unavailable).
 local window_switcher_bindings = os.getenv("HOME") .. "/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/bindings.lua"
 local window_switcher_file = io.open(window_switcher_bindings, "r")
 if window_switcher_file then
@@ -47,15 +47,16 @@ hyprctl reload
 hyprctl configerrors
 ```
 
-`Super+Q` is intentionally added without changing Omarchy's existing Alt+Tab
-binding.
+Orbit replaces Omarchy's stock `Alt+Tab` bindings. The stock direct window
+cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
 
 ## Use
 
-- Press and hold `Super`, then tap `Q` to cycle forward. Release `Super` to
+- Press and hold `Alt`, then tap `Tab` to cycle forward. Release `Alt` to
   activate the selected window.
-- Use `Shift+Q`, `Shift+Tab`, Left, or Up to move backward.
-- Use `Q`, `Tab`, Right, or Down to move forward.
+- Use `Alt+Shift+Tab`, `Shift+Tab`, Left, or Up to move backward.
+- Use `Tab`, Right, or Down to move forward.
+- Use `Super+Q` or `Super+Shift+Q` for Omarchy's original direct window cycle.
 - Press `1`, `2`, or `3` to select Icons, Flip, or Grid. The choice is saved in
   `~/.config/omarchy/shell.json`.
 - Press Enter or Space, or click a window, to activate it.
@@ -78,7 +79,10 @@ hyprctl reload
 hyprctl configerrors
 ```
 
-Removing the plugin does not modify the stock Alt+Tab behavior.
+Removing the guarded include restores Omarchy's stock Alt+Tab behavior on the
+next Hyprland reload. Orbit retains the internal plugin ID
+`io.github.rohan-patnaik.window-switcher` so existing installations and saved
+mode preferences continue to work after the public rename.
 
 ## Development checks
 
