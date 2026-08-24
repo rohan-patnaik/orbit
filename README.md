@@ -103,7 +103,8 @@ omarchy restart shell
 journalctl --user -u omarchy-shell.service -n 100 --no-pager
 ```
 
-This project has not been submitted to the Omarchy plugin marketplace.
+The root `preview.png` is the original monochrome marketplace mark for this
+plugin listing.
 
 ## License
 
