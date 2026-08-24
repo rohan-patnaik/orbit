@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+const windowCard = fs.readFileSync(path.join(root, "components", "WindowCard.qml"), "utf8");
 
 test("manifest declares a persistent overlay", () => {
   assert.equal(manifest.schemaVersion, 1);
@@ -35,4 +36,8 @@ test("repository contains no internal symbolic links", () => {
       if (entry.isDirectory()) pending.push(entryPath);
     }
   }
+});
+
+test("window labels are rendered as plain text", () => {
+  assert.match(windowCard, /text:\s*root\.windowData \? root\.windowData\.label : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
 });

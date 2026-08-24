@@ -85,6 +85,7 @@ Rectangle {
         verticalCenter: parent.verticalCenter
       }
       text: root.windowData ? root.windowData.label : ""
+      textFormat: Text.PlainText
       color: root.selected ? Color.menu.selectedText : Color.menu.text
       elide: Text.ElideRight
       maximumLineCount: 1
