@@ -549,6 +549,7 @@ Item {
           anchors.horizontalCenter: parent.horizontalCenter
           width: Math.min(parent.width - Style.space(48), Style.space(620))
           text: root.windows.length > 0 ? root.windows[root.selectedIndex].title : ""
+          textFormat: Text.PlainText
           color: Color.menu.text
           opacity: 0.72
           elide: Text.ElideRight

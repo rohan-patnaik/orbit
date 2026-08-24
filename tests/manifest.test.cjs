@@ -5,6 +5,8 @@ const test = require("node:test");
 
 const root = path.resolve(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
+const overlay = fs.readFileSync(path.join(root, "Overlay.qml"), "utf8");
+const iconsView = fs.readFileSync(path.join(root, "components", "IconsView.qml"), "utf8");
 const windowCard = fs.readFileSync(path.join(root, "components", "WindowCard.qml"), "utf8");
 
 test("manifest declares a persistent overlay", () => {
@@ -38,6 +40,8 @@ test("repository contains no internal symbolic links", () => {
   }
 });
 
-test("window labels are rendered as plain text", () => {
+test("Hyprland-derived labels are rendered as plain text", () => {
   assert.match(windowCard, /text:\s*root\.windowData \? root\.windowData\.label : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
+  assert.match(overlay, /text:\s*root\.windows\.length > 0 \? root\.windows\[root\.selectedIndex\]\.title : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
+  assert.match(iconsView, /text:\s*tile\.modelData\.label\s*\n\s*textFormat:\s*Text\.PlainText/);
 });

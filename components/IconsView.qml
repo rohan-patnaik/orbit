@@ -109,6 +109,7 @@ Item {
             anchors.leftMargin: Style.space(6)
             anchors.rightMargin: Style.space(6)
             text: tile.modelData.label
+            textFormat: Text.PlainText
             color: tile.selected ? Color.menu.selectedText : Color.menu.text
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
