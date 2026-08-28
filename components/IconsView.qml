@@ -13,7 +13,7 @@ Item {
   signal activateRequested(int index)
 
   readonly property real tileWidth: Style.space(112)
-  readonly property real tileHeight: Style.space(104)
+  readonly property real tileHeight: Style.space(112)
 
   implicitWidth: Math.min(root.maximumWidth, iconRow.implicitWidth)
   implicitHeight: root.tileHeight
@@ -99,6 +99,8 @@ Item {
             width: Style.space(56)
             height: width
             iconSource: tile.modelData.iconSource
+            fallbackText: tile.modelData.fallbackText
+            showBackplate: true
           }
 
           Text {

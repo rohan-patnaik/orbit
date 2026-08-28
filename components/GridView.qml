@@ -17,37 +17,37 @@ Item {
   readonly property int pageSize: 12
   readonly property int firstIndex: Logic.pageStart(root.selectedIndex, root.pageSize)
   readonly property var pageWindows: root.windows.slice(firstIndex, firstIndex + pageSize)
-  readonly property int columnCount: Logic.gridColumns(pageWindows.length, maximumWidth)
-  readonly property int rowCount: Math.ceil(pageWindows.length / Math.max(1, columnCount))
   readonly property real spacing: Style.space(12)
-  readonly property real cardWidth: Math.min(Style.space(292), (maximumWidth - spacing * (columnCount - 1)) / Math.max(1, columnCount))
-  readonly property real cardHeight: Math.min(Style.space(196), (maximumHeight - spacing * (rowCount - 1)) / Math.max(1, rowCount))
+  readonly property real horizontalCardPadding: Style.space(8)
+  readonly property real fixedCardHeight: Style.space(52)
+  readonly property var layoutData: Logic.aspectGridLayout(pageWindows, maximumWidth, maximumHeight, spacing, horizontalCardPadding, fixedCardHeight, Style.space(220))
 
-  implicitWidth: columnCount * cardWidth + Math.max(0, columnCount - 1) * spacing
-  implicitHeight: rowCount * cardHeight + Math.max(0, rowCount - 1) * spacing
+  implicitWidth: layoutData.width
+  implicitHeight: layoutData.height
 
-  Grid {
-    anchors.fill: parent
-    columns: root.columnCount
-    spacing: root.spacing
+  function navigationTarget(index, direction) {
+    const localIndex = index - root.firstIndex
+    const target = Logic.gridMoveByLayout(localIndex, direction, root.layoutData.items)
+    return target < 0 ? index : root.firstIndex + target
+  }
 
-    Repeater {
-      model: root.pageWindows
+  Repeater {
+    model: root.layoutData.items
 
-      WindowCard {
-        required property int index
-        required property var modelData
+    WindowCard {
+      required property var modelData
 
-        width: root.cardWidth
-        height: root.cardHeight
-        windowData: modelData
-        windowIndex: root.firstIndex + index
-        selected: windowIndex === root.selectedIndex
-        hoverArmed: root.hoverArmed
-        previewEnabled: true
-        onSelectRequested: requestedIndex => root.selectRequested(requestedIndex)
-        onActivateRequested: requestedIndex => root.activateRequested(requestedIndex)
-      }
+      x: modelData.x
+      y: modelData.y
+      width: modelData.width
+      height: modelData.height
+      windowData: root.pageWindows[modelData.index]
+      windowIndex: root.firstIndex + modelData.index
+      selected: windowIndex === root.selectedIndex
+      hoverArmed: root.hoverArmed
+      previewEnabled: true
+      onSelectRequested: requestedIndex => root.selectRequested(requestedIndex)
+      onActivateRequested: requestedIndex => root.activateRequested(requestedIndex)
     }
   }
 

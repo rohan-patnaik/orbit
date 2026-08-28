@@ -13,7 +13,7 @@ test("manifest declares a persistent overlay", () => {
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.id, "io.github.rohan-patnaik.window-switcher");
   assert.equal(manifest.name, "Orbit");
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.1.1");
   assert.deepEqual(manifest.kinds, ["overlay"]);
   assert.equal(manifest.keepLoaded, true);
   assert.equal(manifest.entryPoints.overlay, "Overlay.qml");
@@ -42,6 +42,6 @@ test("repository contains no internal symbolic links", () => {
 
 test("Hyprland-derived labels are rendered as plain text", () => {
   assert.match(windowCard, /text:\s*root\.windowData \? root\.windowData\.label : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
-  assert.match(overlay, /text:\s*root\.windows\.length > 0 \? root\.windows\[root\.selectedIndex\]\.title : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
+  assert.match(overlay, /text:\s*root\.entries\.length > 0 \? root\.entries\[root\.selectedIndex\]\.title : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
   assert.match(iconsView, /text:\s*tile\.modelData\.label\s*\n\s*textFormat:\s*Text\.PlainText/);
 });

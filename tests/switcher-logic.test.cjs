@@ -44,6 +44,20 @@ test("duplicate application labels receive stable ordinals", () => {
   assert.deepEqual(Array.from(rows, row => row.label), ["Firefox 1", "Firefox 2", "Terminal"]);
 });
 
+test("icon mode groups windows by application and preserves MRU representatives", () => {
+  const entries = logic.applicationEntries([
+    { appKey: "firefox", appName: "Firefox", address: "0x1", title: "Recent" },
+    { appKey: "terminal", appName: "Terminal", address: "0x2", title: "Shell" },
+    { appKey: "firefox", appName: "Firefox", address: "0x3", title: "Older" }
+  ]);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].address, "0x1");
+  assert.deepEqual(Array.from(entries[0].memberAddresses), ["0x1", "0x3"]);
+  assert.equal(entries[0].windowCount, 2);
+  assert.equal(logic.entryIndexForAddress(entries, "0x3"), 0);
+  assert.equal(logic.appMonogram("Visual Studio Code"), "VC");
+});
+
 test("selection wraps in both directions", () => {
   assert.equal(logic.wrapIndex(3, 3), 0);
   assert.equal(logic.wrapIndex(-1, 3), 2);
@@ -72,12 +86,25 @@ test("persisted mode comes from the matching plugin entry", () => {
   assert.equal(logic.modeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "grid");
 });
 
-test("grid geometry is bounded and navigation wraps", () => {
-  assert.equal(logic.gridColumns(3, 1200), 2);
-  assert.equal(logic.gridColumns(8, 1200), 4);
-  assert.equal(logic.gridColumns(8, 600), 2);
-  assert.equal(logic.gridMove(1, "down", 6, 3), 4);
-  assert.equal(logic.gridMove(0, "up", 6, 3), 3);
+test("grid geometry preserves source aspect ratios and navigation wraps", () => {
+  const rows = [
+    { previewWidth: 1600, previewHeight: 900 },
+    { previewWidth: 900, previewHeight: 900 },
+    { previewWidth: 500, previewHeight: 900 },
+    { previewWidth: 1200, previewHeight: 900 }
+  ];
+  const layout = logic.aspectGridLayout(rows, 900, 500, 12, 8, 52, 220);
+  assert.equal(layout.items.length, rows.length);
+  assert.ok(layout.width <= 900);
+  assert.ok(layout.height <= 500);
+  for (const item of layout.items) {
+    const expectedAspect = rows[item.index].previewWidth / rows[item.index].previewHeight;
+    assert.ok(Math.abs((item.width - 16) / layout.previewHeight - expectedAspect) < 0.001);
+  }
+  assert.equal(logic.gridMoveByLayout(0, "left", layout.items), 3);
+  assert.equal(logic.gridMoveByLayout(3, "right", layout.items), 0);
+  const down = logic.gridMoveByLayout(0, "down", layout.items);
+  assert.notEqual(layout.items[down].row, layout.items[0].row);
   assert.equal(logic.pageStart(13, 12), 12);
 });
 

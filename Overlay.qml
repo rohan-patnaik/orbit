@@ -23,20 +23,34 @@ Item {
   property var windows: []
   property int selectedIndex: 0
   property string mode: "grid"
+  readonly property var entries: root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
   property int snapshotWorkspaceId: -1
   property string snapshotMonitorName: ""
   property int snapshotMonitorId: -1
   property var targetScreen: null
   property var pendingWindow: null
+  property bool snapshotPending: false
+  property bool snapshotCancelled: false
+  property bool pendingActivateOnRelease: false
+  property string pendingModifier: ""
+  property int pendingDirection: 1
+  property int queuedSteps: 0
 
-  function applicationInfo(applicationClass, title) {
+  function applicationInfo(applicationClass, initialClass, appId) {
     const originalClass = String(applicationClass || "").trim()
-    const lowerClass = originalClass.toLowerCase()
-    const variants = [originalClass, lowerClass, lowerClass.replace(/-/g, ""), lowerClass.split(".")[0], lowerClass.split(".").pop()]
+    const rawVariants = [appId, applicationClass, initialClass]
+    const variants = []
+    for (const rawVariant of rawVariants) {
+      const value = String(rawVariant || "").trim().replace(/\.desktop$/i, "")
+      const lower = value.toLowerCase()
+      const candidates = [value, lower, lower.replace(/-/g, ""), lower.split(".")[0], lower.split(".").pop()]
+      for (const candidate of candidates) {
+        if (candidate && !variants.includes(candidate))
+          variants.push(candidate)
+      }
+    }
 
     for (const variant of variants) {
-      if (!variant)
-        continue
       const entry = DesktopEntries.byId(variant)
       if (entry)
         return desktopEntryInfo(entry, originalClass)
@@ -44,43 +58,44 @@ Item {
 
     const applications = DesktopEntries.applications.values || []
     for (const entry of applications) {
-      if (entry.startupClass && String(entry.startupClass).toLowerCase() === lowerClass) {
+      const startupClass = String(entry.startupClass || "").toLowerCase()
+      if (startupClass && variants.includes(startupClass))
         return desktopEntryInfo(entry, originalClass)
-      }
-    }
-
-    const lowerTitle = String(title || "").toLowerCase()
-    if (lowerTitle) {
-      for (const entry of applications) {
-        const name = String(entry.name || "").trim()
-        if (name && lowerTitle.includes(name.toLowerCase())) {
-          return desktopEntryInfo(entry, originalClass)
-        }
-      }
     }
 
     for (const variant of variants) {
-      if (!variant)
-        continue
+      const entry = DesktopEntries.heuristicLookup(variant)
+      if (entry)
+        return desktopEntryInfo(entry, originalClass)
+    }
+
+    for (const variant of variants) {
       const icon = Quickshell.iconPath(variant, true)
       if (icon) {
         return {
+          id: Logic.normalizeApplicationKey(variant),
           name: Logic.friendlyAppName(originalClass),
-          icon: icon
+          icon: icon,
+          fallbackText: Logic.appMonogram(originalClass)
         }
       }
     }
 
     return {
+      id: Logic.normalizeApplicationKey(appId || initialClass || originalClass),
       name: Logic.friendlyAppName(originalClass),
-      icon: Quickshell.iconPath("application-x-executable", true)
+      icon: "",
+      fallbackText: Logic.appMonogram(originalClass)
     }
   }
 
   function desktopEntryInfo(entry, fallbackName) {
+    const name = String(entry.name || Logic.friendlyAppName(fallbackName))
     return {
-      name: String(entry.name || Logic.friendlyAppName(fallbackName)),
-      icon: entry.icon ? Quickshell.iconPath(entry.icon, "application-x-executable") : Quickshell.iconPath("application-x-executable", true)
+      id: Logic.normalizeApplicationKey(entry.id || fallbackName),
+      name: name,
+      icon: entry.icon ? Quickshell.iconPath(entry.icon, true) : "",
+      fallbackText: Logic.appMonogram(name)
     }
   }
 
@@ -93,68 +108,115 @@ Item {
     return screens.length > 0 ? screens[0] : null
   }
 
-  function snapshotCurrentWindows() {
+  function captureFocusContext() {
     const workspace = Hyprland.focusedWorkspace
     const monitor = Hyprland.focusedMonitor
     if (!workspace || !monitor || Number(workspace.id) <= 0)
-      return []
+      return false
 
     root.snapshotWorkspaceId = Number(workspace.id)
     root.snapshotMonitorName = String(monitor.name || "")
     root.snapshotMonitorId = Number(monitor.id)
     root.targetScreen = root.focusedScreen()
+    return true
+  }
+
+  function snapshotCurrentWindows(clients) {
+    if (!Array.isArray(clients))
+      return []
 
     const rows = []
     const toplevels = Hyprland.toplevels.values || []
+    const toplevelByAddress = ({})
     for (const toplevel of toplevels) {
-      const ipc = toplevel.lastIpcObject || {}
-      const address = Logic.safeAddress(toplevel.address || ipc.address)
+      const address = Logic.safeAddress(toplevel.address)
+      if (address)
+        toplevelByAddress[address] = toplevel
+    }
+
+    for (const ipc of clients) {
+      const address = Logic.safeAddress(ipc.address)
       if (!address || ipc.mapped === false)
         continue
-      const workspaceId = toplevel.workspace ? Number(toplevel.workspace.id) : Number(ipc.workspace ? ipc.workspace.id : -1)
-      const monitorName = toplevel.monitor ? String(toplevel.monitor.name || "") : ""
-      const monitorId = toplevel.monitor ? Number(toplevel.monitor.id) : Number(ipc.monitor)
+      const toplevel = toplevelByAddress[address] || null
+      const workspaceId = Number(ipc.workspace ? ipc.workspace.id : -1)
+      const monitorName = toplevel && toplevel.monitor ? String(toplevel.monitor.name || "") : ""
+      const monitorId = Number(ipc.monitor)
 
       if (!Logic.isEligibleWindow(ipc, workspaceId, monitorName, monitorId, root.snapshotWorkspaceId, root.snapshotMonitorName, root.snapshotMonitorId)) {
         continue
       }
 
-      const applicationClass = String(ipc.class || ipc.initialClass || (toplevel.wayland ? toplevel.wayland.appId : "") || "Application")
-      const title = String(toplevel.title || ipc.title || applicationClass)
-      const application = root.applicationInfo(applicationClass, title)
+      const wayland = toplevel ? toplevel.wayland || null : null
+      const appId = String(wayland ? wayland.appId || "" : "")
+      const initialClass = String(ipc.initialClass || "")
+      const applicationClass = String(ipc.class || initialClass || appId || "Application")
+      const title = String(ipc.title || (toplevel ? toplevel.title || "" : "") || applicationClass)
+      const application = root.applicationInfo(applicationClass, initialClass, appId)
+      const size = Array.isArray(ipc.size) ? ipc.size : []
       rows.push({
         address: address,
+        appKey: application.id,
         applicationClass: applicationClass,
         appName: application.name,
         iconSource: application.icon,
+        fallbackText: application.fallbackText,
         title: title,
         focusHistoryId: Logic.focusHistoryId(ipc.focusHistoryID),
         groupIndex: Logic.groupIndex(ipc.grouped, address),
         pinned: ipc.pinned === true,
         xwayland: ipc.xwayland === true,
+        previewWidth: Number(size[0]) || 16,
+        previewHeight: Number(size[1]) || 9,
         toplevel: toplevel,
-        wayland: toplevel.wayland || null
+        wayland: wayland
       })
     }
 
     return Logic.decorateDuplicateLabels(Logic.sortByRecency(rows))
   }
 
-  function startSwitcher(activateOnRelease, modifier, direction) {
-    root.mode = root.configuredMode()
-    Hyprland.refreshToplevels()
-    const nextWindows = root.snapshotCurrentWindows()
-    if (nextWindows.length < 2)
+  function completeWindowQuery(text) {
+    if (!root.snapshotPending)
       return
+    root.snapshotPending = false
+    if (root.snapshotCancelled)
+      return
+    let clients = []
+    try {
+      clients = JSON.parse(text)
+    } catch (error) {
+      console.warn("window-switcher: unable to read current window order:", error)
+      return
+    }
+
+    const nextWindows = root.snapshotCurrentWindows(clients)
     root.windows = nextWindows
-    root.selectedIndex = Logic.initialSelection(nextWindows, direction)
-    root.releaseToActivate = activateOnRelease
-    root.releaseModifier = activateOnRelease ? String(modifier || "") : ""
+    const nextEntries = root.mode === "icons" ? Logic.applicationEntries(nextWindows) : nextWindows
+    if (nextEntries.length < 2)
+      return
+    const initialIndex = Logic.initialSelection(nextEntries, root.pendingDirection)
+    root.selectedIndex = Logic.wrapIndex(initialIndex + root.queuedSteps, nextEntries.length)
+    root.releaseToActivate = root.pendingActivateOnRelease
+    root.releaseModifier = root.pendingActivateOnRelease ? root.pendingModifier : ""
     root.sawKeyEvent = false
     root.hoverArmed = false
     root.initialPointerPosition = Qt.point(-1, -1)
     root.opened = true
     watchdog.restart()
+  }
+
+  function startSwitcher(activateOnRelease, modifier, direction) {
+    root.mode = root.configuredMode()
+    if (!root.captureFocusContext())
+      return
+    root.snapshotPending = true
+    root.snapshotCancelled = false
+    root.pendingActivateOnRelease = activateOnRelease
+    root.pendingModifier = String(modifier || "")
+    root.pendingDirection = direction
+    root.queuedSteps = 0
+    windowQuery.running = true
   }
 
   function open(payloadJson) {
@@ -175,8 +237,13 @@ Item {
   }
 
   function setMode(value) {
+    const selected = root.entries[root.selectedIndex]
+    const selectedAddress = selected ? selected.address : ""
     const nextMode = Logic.normalizeMode(value)
     root.mode = nextMode
+    const nextEntries = root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
+    const matchingIndex = Logic.entryIndexForAddress(nextEntries, selectedAddress)
+    root.selectedIndex = matchingIndex >= 0 ? matchingIndex : Math.min(root.selectedIndex, Math.max(0, nextEntries.length - 1))
     if (root.shell && typeof root.shell.updateEntryInline === "function") {
       root.shell.updateEntryInline(root.pluginId, {
         id: root.pluginId,
@@ -197,13 +264,15 @@ Item {
   }
 
   function cycle(step) {
-    root.selectedIndex = Logic.wrapIndex(root.selectedIndex + step, root.windows.length)
+    root.selectedIndex = Logic.wrapIndex(root.selectedIndex + step, root.entries.length)
     watchdog.restart()
   }
 
   function invokeShortcut(step) {
     if (root.opened)
       root.cycle(step)
+    else if (root.snapshotPending)
+      root.queuedSteps += step
     else
       root.startSwitcher(true, "alt", step)
   }
@@ -217,7 +286,7 @@ Item {
   }
 
   function select(index) {
-    if (index < 0 || index >= root.windows.length)
+    if (index < 0 || index >= root.entries.length)
       return
     root.selectedIndex = index
     watchdog.restart()
@@ -228,17 +297,14 @@ Item {
       root.cycle(direction === "left" || direction === "up" ? -1 : 1)
       return
     }
-    const firstIndex = Logic.pageStart(root.selectedIndex, 12)
-    const pageCount = Math.min(12, root.windows.length - firstIndex)
-    const availableWidth = root.targetScreen ? Number(root.targetScreen.width) - Style.space(96) : Style.space(1200)
-    const columns = Logic.gridColumns(pageCount, availableWidth)
-    root.select(Logic.gridMove(root.selectedIndex, direction, root.windows.length, columns))
+    if (viewLoader.item && typeof viewLoader.item.navigationTarget === "function")
+      root.select(viewLoader.item.navigationTarget(root.selectedIndex, direction))
   }
 
   function finish(activate) {
     if (!root.opened)
       return
-    const selected = activate && root.selectedIndex >= 0 ? root.windows[root.selectedIndex] : null
+    const selected = activate && root.selectedIndex >= 0 ? root.entries[root.selectedIndex] : null
     watchdog.stop()
     root.releaseToActivate = false
     root.releaseModifier = ""
@@ -254,6 +320,10 @@ Item {
   }
 
   function cancel() {
+    if (root.snapshotPending) {
+      root.snapshotCancelled = true
+      root.snapshotPending = false
+    }
     root.finish(false)
   }
 
@@ -272,6 +342,8 @@ Item {
   function pruneClosedWindows() {
     if (!root.opened)
       return
+    const selected = root.entries[root.selectedIndex]
+    const selectedAddress = selected ? selected.address : ""
     const liveAddresses = ({})
     const toplevels = Hyprland.toplevels.values || []
     for (const toplevel of toplevels) {
@@ -282,12 +354,22 @@ Item {
     const remaining = root.windows.filter(window => liveAddresses[window.address] === true)
     if (remaining.length === root.windows.length)
       return
-    if (remaining.length < 2) {
+    root.windows = Logic.decorateDuplicateLabels(remaining)
+    const remainingEntries = root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
+    if (remainingEntries.length < 2) {
       root.cancel()
       return
     }
-    root.windows = Logic.decorateDuplicateLabels(remaining)
-    root.selectedIndex = Math.min(root.selectedIndex, remaining.length - 1)
+    const matchingIndex = Logic.entryIndexForAddress(remainingEntries, selectedAddress)
+    root.selectedIndex = matchingIndex >= 0 ? matchingIndex : Math.min(root.selectedIndex, remainingEntries.length - 1)
+  }
+
+  Process {
+    id: windowQuery
+    command: ["hyprctl", "-j", "clients"]
+    stdout: StdioCollector {
+      onStreamFinished: root.completeWindowQuery(text)
+    }
   }
 
   GlobalShortcut {
@@ -490,7 +572,7 @@ Item {
 
           IconsView {
             maximumWidth: panel.width - Style.space(96)
-            windows: root.windows
+            windows: root.entries
             selectedIndex: root.selectedIndex
             hoverArmed: root.hoverArmed
             onSelectRequested: index => root.select(index)
@@ -507,7 +589,7 @@ Item {
           GridView {
             maximumWidth: panel.width - Style.space(96)
             maximumHeight: panel.height - Style.space(190)
-            windows: root.windows
+            windows: root.entries
             selectedIndex: root.selectedIndex
             hoverArmed: root.hoverArmed
             onSelectRequested: index => root.select(index)
@@ -524,7 +606,7 @@ Item {
           FlipView {
             maximumWidth: panel.width - Style.space(96)
             maximumHeight: panel.height - Style.space(190)
-            windows: root.windows
+            windows: root.entries
             selectedIndex: root.selectedIndex
             hoverArmed: root.hoverArmed
             onSelectRequested: index => root.select(index)
@@ -548,7 +630,7 @@ Item {
           anchors.bottomMargin: Style.space(16)
           anchors.horizontalCenter: parent.horizontalCenter
           width: Math.min(parent.width - Style.space(48), Style.space(620))
-          text: root.windows.length > 0 ? root.windows[root.selectedIndex].title : ""
+          text: root.entries.length > 0 ? root.entries[root.selectedIndex].title : ""
           textFormat: Text.PlainText
           color: Color.menu.text
           opacity: 0.72

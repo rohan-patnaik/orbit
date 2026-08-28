@@ -22,3 +22,17 @@ test("the overlay cycles backward and activates when Alt is released", () => {
   assert.match(overlay, /event\.key === Qt\.Key_Alt/);
   assert.match(overlay, /root\.releaseModifier === "alt" \? altReleased/);
 });
+
+test("the overlay snapshots the compositor MRU order before opening", () => {
+  assert.match(overlay, /command: \["hyprctl", "-j", "clients"\]/);
+  assert.match(overlay, /JSON\.parse\(text\)/);
+  assert.match(overlay, /focusHistoryID/);
+  assert.match(overlay, /queuedSteps/);
+  assert.doesNotMatch(overlay, /lastIpcObject/);
+});
+
+test("icon mode uses desktop metadata and groups application windows", () => {
+  assert.match(overlay, /DesktopEntries\.heuristicLookup/);
+  assert.match(overlay, /Logic\.applicationEntries/);
+  assert.doesNotMatch(overlay, /application-x-executable/);
+});

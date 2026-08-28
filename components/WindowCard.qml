@@ -40,6 +40,7 @@ Rectangle {
       width: Math.min(parent.width, parent.height) * 0.32
       height: width
       iconSource: root.windowData ? root.windowData.iconSource : ""
+      fallbackText: root.windowData ? root.windowData.fallbackText : "?"
       opacity: preview.hasContent ? 0 : 0.82
     }
 
@@ -74,6 +75,7 @@ Rectangle {
       width: Style.space(21)
       height: width
       iconSource: root.windowData ? root.windowData.iconSource : ""
+      fallbackText: root.windowData ? root.windowData.fallbackText : "?"
     }
 
     Text {

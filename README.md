@@ -1,18 +1,26 @@
 # Omarchy Orbit
 
 Orbit is a native Omarchy Quattro overlay for switching between windows visible in the
-current workspace. Separate windows from the same application remain separate
-entries. Browser tabs are outside the plugin's scope.
+current workspace. Grid and Flip keep separate windows from the same application as
+separate entries. Browser tabs are outside the plugin's scope.
 
 The plugin provides three modes:
 
-- **Icons** — a compact icon strip with one entry per window.
+- **Icons** — a macOS-style strip with one locally resolved official icon per
+  application and its most recently used window as the activation target.
 - **Flip** — an angled stack of window previews.
-- **Grid** — an adaptive thumbnail grid and the default mode.
+- **Grid** — an adaptive, aspect-aware thumbnail grid and the default mode.
 
-Grid and Flip use bounded, one-frame Quickshell window captures. Captures are
-released when the overlay closes and are never written to disk or sent over the
-network. A window's application icon is shown if its preview is unavailable.
+Grid and Flip use bounded, one-frame Quickshell window captures. Grid sizes each
+card to the source window's aspect ratio, so the full capture fills the preview
+without cropping, stretching, or letterboxing. Captures are released when the
+overlay closes and are never written to disk or sent over the network. Icons are
+resolved from installed desktop entries and the local icon theme; Orbit does not
+download icons. A unique application monogram is used only when no icon is available.
+
+Each switch session is built from one fresh Hyprland client query ordered by
+`focusHistoryID`. The active window is first, the last-used window is second, and
+releasing Alt activates the current selection, matching Windows-style MRU cycling.
 
 ## Requirements
 
