@@ -39,6 +39,16 @@ test("window activation preserves each app's compositor and client fullscreen st
   assert.match(overlay, /root\.restoreSelectedFullscreen\(\)/);
 });
 
+test("exact-address activation raises the focused window and waits for confirmation", () => {
+  assert.match(
+    overlay,
+    /hl\.dsp\.focus\(\{ window = "address:' \+ selected\.address[\s\S]*hl\.dsp\.window\.bring_to_top\(\)/
+  );
+  assert.match(overlay, /activationCommitAttempts < root\.activationCommitAttemptLimit/);
+  assert.match(overlay, /root\.abortActivationCommit\(\)[\s\S]*return/);
+  assert.match(overlay, /selected window did not accept focus; keeping Orbit open/);
+});
+
 test("fullscreen handoff stays covered and disables transient layout animation", () => {
   assert.match(overlay, /root\.activationCommitInProgress = true/);
   assert.match(overlay, /id: activationCommitTimer[\s\S]*root\.advanceActivationCommit\(\)/);
@@ -48,6 +58,18 @@ test("fullscreen handoff stays covered and disables transient layout animation",
   assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "unset"/);
   assert.match(overlay, /root\.finishActivationCommit\(\)[\s\S]*root\.opened = false/);
   assert.doesNotMatch(overlay, /id: fullscreenRestoreTimer/);
+});
+
+test("resize-sensitive clients remain covered until their restored surface settles", () => {
+  assert.match(overlay, /root\.handoffRestoresTargetFirst = handoff\.restoreTargetBeforeFocus/);
+  assert.match(overlay, /root\.handoffNeedsCover = handoff\.targetResizes && !targetAlreadyMatchesSourceSize/);
+  assert.match(overlay, /id: activationSettleTimer[\s\S]*interval: 1600/);
+  assert.match(overlay, /id: activationRevealTimer[\s\S]*interval: 80/);
+  assert.match(overlay, /readonly property var captureWindow: root\.windows\.length > 0 \? root\.windows\[0\] : null/);
+  assert.match(overlay, /id: outgoingCapture[\s\S]*captureSource: captureWindow \? captureWindow\.wayland : null/);
+  assert.match(overlay, /sourceItem: outgoingCapture[\s\S]*hideSource: true[\s\S]*live: !root\.activationCommitInProgress/);
+  assert.match(overlay, /id: targetReadyProbe[\s\S]*live: true[\s\S]*onSourceSizeChanged: root\.observeActivationTargetSurface/);
+  assert.match(overlay, /if \(root\.activationTargetSurfaceReady\)[\s\S]*return[\s\S]*activationRevealTimer\.restart\(\)/);
 });
 
 test("icon mode uses desktop metadata and groups application windows", () => {

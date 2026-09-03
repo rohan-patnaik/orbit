@@ -29,6 +29,19 @@ window animations until the destination is ready, so intermediate tiled geometry
 never exposed. Fullscreen browser video therefore remains fullscreen when switching
 away and back without a tiled-layout flash.
 
+Exact-address activation is followed by an explicit raise and confirmed against
+Hyprland's active window before Orbit closes. This prevents a fullscreen or obscured
+window from swallowing Alt+Tab and leaving the user on the app they started from.
+
+On this Hyprland tiling layout, focus can transfer the workspace's active maximized or
+fullscreen geometry, so the destination may still need to resize. Orbit starts that restore
+before focus moves and keeps a frozen local capture of the outgoing window on screen.
+A hidden live probe waits for the destination to submit a surface at its new size; Orbit
+then reveals it after a short two-frame guard. This makes the transition visually atomic
+instead of exposing a partial old-size frame from a GPU-rendered browser or desktop app.
+The protection is application-agnostic, so it also covers other video sites, documents,
+terminals, and Electron-style applications.
+
 ## Requirements
 
 - Omarchy Quattro with plugin support

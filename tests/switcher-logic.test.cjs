@@ -28,6 +28,27 @@ test("fullscreen state normalization preserves valid Hyprland states", () => {
   assert.equal(logic.resumableFullscreenState(0, 0), 0);
 });
 
+test("fullscreen handoff restores matching target state before focus transfer", () => {
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(1, 1, 1))),
+    { restoreTargetBeforeFocus: true, releaseSource: false, targetResizes: false }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(2, 0, 2))),
+    { restoreTargetBeforeFocus: true, releaseSource: false, targetResizes: true }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(2, 1, 1))),
+    { restoreTargetBeforeFocus: false, releaseSource: true, targetResizes: false }
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(1, 0, 0))),
+    { restoreTargetBeforeFocus: false, releaseSource: true, targetResizes: false }
+  );
+  assert.equal(logic.dimensionsDiffer(1896, 1030, 1896, 1030, 2), false);
+  assert.equal(logic.dimensionsDiffer(1896, 1030, 941, 508, 2), true);
+});
+
 test("eligibility is limited to the current workspace or visible pinned windows", () => {
   assert.equal(logic.isEligibleWindow({ mapped: true }, 2, "DP-1", 1, 2, "DP-1", 1), true);
   assert.equal(logic.isEligibleWindow({ mapped: true }, 3, "DP-1", 1, 2, "DP-1", 1), false);

@@ -33,8 +33,13 @@ Item {
   property var pendingFullscreenRestore: null
   property var rememberedFullscreenStates: ({})
   property var handoffAnimationAddresses: []
+  property bool handoffRestoresTargetFirst: false
+  property bool handoffNeedsCover: false
   property bool activationCommitInProgress: false
+  property bool activationCommitSettling: false
+  property bool activationTargetSurfaceReady: false
   property int activationCommitAttempts: 0
+  readonly property int activationCommitAttemptLimit: 50
   property bool snapshotPending: false
   property bool snapshotCancelled: false
   property bool pendingActivateOnRelease: false
@@ -341,6 +346,8 @@ Item {
   function prepareFullscreenHandoff(source, selected) {
     root.pendingFullscreenRelease = null
     root.pendingFullscreenRestore = null
+    root.handoffRestoresTargetFirst = false
+    root.handoffNeedsCover = false
     if (!source || !selected)
       return
     const sourceAddress = Logic.safeAddress(source.address)
@@ -349,18 +356,23 @@ Item {
       return
     root.rememberSourceFullscreen(source)
     const selectedSnapshot = root.rememberedFullscreenStates[selectedAddress] || root.fullscreenSnapshot(selected)
+    const desiredInternalState = selectedSnapshot ? Logic.resumableFullscreenState(selectedSnapshot.internal, selectedSnapshot.client) : 0
     if (selectedSnapshot) {
       root.pendingFullscreenRestore = {
         address: selectedAddress,
-        internal: Logic.resumableFullscreenState(selectedSnapshot.internal, selectedSnapshot.client)
+        internal: desiredInternalState
       }
     }
 
-    const suppressAnimations = Logic.fullscreenState(source.fullscreenState) > 0 || (root.pendingFullscreenRestore && root.pendingFullscreenRestore.internal > 0)
+    const handoff = Logic.fullscreenHandoffPlan(source.fullscreenState, selected.fullscreenState, desiredInternalState)
+    root.handoffRestoresTargetFirst = handoff.restoreTargetBeforeFocus
+    const targetAlreadyMatchesSourceSize = handoff.restoreTargetBeforeFocus && !Logic.dimensionsDiffer(source.previewWidth, source.previewHeight, selected.previewWidth, selected.previewHeight, 2)
+    root.handoffNeedsCover = handoff.targetResizes && !targetAlreadyMatchesSourceSize
+    const suppressAnimations = handoff.releaseSource || handoff.targetResizes
     if (suppressAnimations)
       root.suppressHandoffAnimations([sourceAddress, selectedAddress])
 
-    if (Logic.fullscreenState(source.fullscreenState) > 0) {
+    if (handoff.releaseSource) {
       root.pendingFullscreenRelease = {
         address: sourceAddress
       }
@@ -397,6 +409,8 @@ Item {
     const selected = root.pendingWindow
     if (!selected)
       return
+    if (root.handoffRestoresTargetFirst)
+      root.restoreSelectedFullscreen()
     const release = root.pendingFullscreenRelease
     if (release) {
       Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = -1, action = "set", window = "address:' + release.address + '" })')
@@ -407,16 +421,44 @@ Item {
     if (selected.wayland)
       selected.wayland.activate()
     Hyprland.dispatch('hl.dsp.focus({ window = "address:' + selected.address + '" })')
-    root.restoreSelectedFullscreen()
+    Hyprland.dispatch('hl.dsp.window.bring_to_top()')
+    if (!root.handoffRestoresTargetFirst)
+      root.restoreSelectedFullscreen()
+  }
+
+  function abortActivationCommit() {
+    activationCommitTimer.stop()
+    activationSettleTimer.stop()
+    activationRevealTimer.stop()
+    root.releaseHandoffAnimations()
+    console.warn("window-switcher: selected window did not accept focus; keeping Orbit open")
+    root.pendingWindow = null
+    root.pendingFullscreenRelease = null
+    root.pendingFullscreenRestore = null
+    root.handoffRestoresTargetFirst = false
+    root.handoffNeedsCover = false
+    root.activationCommitInProgress = false
+    root.activationCommitSettling = false
+    root.activationTargetSurfaceReady = false
+    root.activationCommitAttempts = 0
+    root.releaseToActivate = false
+    root.releaseModifier = ""
+    watchdog.restart()
   }
 
   function finishActivationCommit() {
     activationCommitTimer.stop()
+    activationSettleTimer.stop()
+    activationRevealTimer.stop()
     root.releaseHandoffAnimations()
     root.pendingWindow = null
     root.pendingFullscreenRelease = null
     root.pendingFullscreenRestore = null
+    root.handoffRestoresTargetFirst = false
+    root.handoffNeedsCover = false
     root.activationCommitInProgress = false
+    root.activationCommitSettling = false
+    root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
     root.opened = false
   }
@@ -440,11 +482,37 @@ Item {
     const selectedIsActive = active && Logic.safeAddress(active.address) === Logic.safeAddress(selected.address)
     if (!selectedIsActive) {
       root.requestPendingActivation()
-      if (root.activationCommitAttempts < 8)
+      if (root.activationCommitAttempts < root.activationCommitAttemptLimit)
         return
+      root.abortActivationCommit()
+      return
+    }
+
+    if (root.handoffNeedsCover && !root.activationCommitSettling) {
+      activationCommitTimer.stop()
+      root.activationCommitSettling = true
+      if (root.activationTargetSurfaceReady)
+        activationRevealTimer.restart()
+      else
+        activationSettleTimer.restart()
+      return
     }
 
     root.finishActivationCommit()
+  }
+
+  function observeActivationTargetSurface(width, height) {
+    if (!root.activationCommitInProgress || !root.handoffNeedsCover || !root.pendingWindow)
+      return
+    if (root.activationTargetSurfaceReady)
+      return
+    if (!Logic.dimensionsDiffer(width, height, root.pendingWindow.previewWidth, root.pendingWindow.previewHeight, 2))
+      return
+    root.activationTargetSurfaceReady = true
+    if (root.activationCommitSettling) {
+      activationSettleTimer.stop()
+      activationRevealTimer.restart()
+    }
   }
 
   function finish(activate) {
@@ -461,6 +529,8 @@ Item {
     root.prepareFullscreenHandoff(root.windows.length > 0 ? root.windows[0] : null, selected)
     root.pendingWindow = selected
     root.activationCommitInProgress = true
+    root.activationCommitSettling = false
+    root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
     activationCommitTimer.restart()
   }
@@ -559,6 +629,18 @@ Item {
     onTriggered: root.advanceActivationCommit()
   }
 
+  Timer {
+    id: activationSettleTimer
+    interval: 1600
+    onTriggered: root.finishActivationCommit()
+  }
+
+  Timer {
+    id: activationRevealTimer
+    interval: 80
+    onTriggered: root.finishActivationCommit()
+  }
+
   LazyLoader {
     active: root.opened
 
@@ -603,8 +685,10 @@ Item {
       }
 
       Rectangle {
+        id: switcherScrim
+
         anchors.fill: parent
-        color: Color.menu.scrim
+        color: root.activationCommitInProgress && root.handoffNeedsCover ? Color.menu.background : Color.menu.scrim
 
         TapHandler {
           onTapped: root.cancel()
@@ -764,6 +848,59 @@ Item {
           horizontalAlignment: Text.AlignHCenter
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.caption
+        }
+      }
+
+      Rectangle {
+        id: handoffCover
+
+        anchors.fill: parent
+        z: root.activationCommitInProgress && root.handoffNeedsCover ? 1000 : -1000
+        color: Color.menu.background
+        clip: true
+
+        ScreencopyView {
+          id: outgoingCapture
+
+          readonly property var captureWindow: root.windows.length > 0 ? root.windows[0] : null
+          readonly property real coverScale: sourceSize.width > 0 && sourceSize.height > 0 ? Math.max(handoffCover.width / sourceSize.width, handoffCover.height / sourceSize.height) : 1
+
+          anchors.centerIn: parent
+          width: sourceSize.width > 0 ? sourceSize.width * coverScale : handoffCover.width
+          height: sourceSize.height > 0 ? sourceSize.height * coverScale : handoffCover.height
+          captureSource: captureWindow ? captureWindow.wayland : null
+          constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
+          paintCursor: false
+          live: false
+        }
+
+        ShaderEffectSource {
+          anchors.centerIn: parent
+          width: outgoingCapture.width
+          height: outgoingCapture.height
+          sourceItem: outgoingCapture
+          hideSource: true
+          live: !root.activationCommitInProgress
+        }
+
+        ScreencopyView {
+          id: targetReadyProbe
+
+          anchors.fill: parent
+          captureSource: root.pendingWindow ? root.pendingWindow.wayland : null
+          constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
+          paintCursor: false
+          live: true
+          opacity: 0
+          onHasContentChanged: root.observeActivationTargetSurface(sourceSize.width, sourceSize.height)
+          onSourceSizeChanged: root.observeActivationTargetSurface(sourceSize.width, sourceSize.height)
+        }
+
+        Timer {
+          interval: 32
+          repeat: true
+          running: root.activationCommitInProgress && root.handoffNeedsCover
+          onTriggered: root.observeActivationTargetSurface(targetReadyProbe.sourceSize.width, targetReadyProbe.sourceSize.height)
         }
       }
     }

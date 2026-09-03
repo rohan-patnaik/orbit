@@ -21,6 +21,24 @@ function resumableFullscreenState(internalState, clientState) {
   return internal > 0 ? internal : fullscreenState(clientState)
 }
 
+function fullscreenHandoffPlan(sourceInternalState, targetInternalState, targetDesiredState) {
+  var source = fullscreenState(sourceInternalState)
+  var currentTarget = fullscreenState(targetInternalState)
+  var desiredTarget = fullscreenState(targetDesiredState)
+  var restoreTargetBeforeFocus = source > 0 && source === desiredTarget
+  return {
+    restoreTargetBeforeFocus: restoreTargetBeforeFocus,
+    releaseSource: source > 0 && !restoreTargetBeforeFocus,
+    targetResizes: currentTarget !== desiredTarget
+  }
+}
+
+function dimensionsDiffer(firstWidth, firstHeight, secondWidth, secondHeight, tolerance) {
+  var limit = Math.max(0, Number(tolerance) || 0)
+  return Math.abs((Number(firstWidth) || 0) - (Number(secondWidth) || 0)) > limit
+    || Math.abs((Number(firstHeight) || 0) - (Number(secondHeight) || 0)) > limit
+}
+
 function isEligibleWindow(ipc, workspaceId, monitorName, monitorId,
     activeWorkspaceId, activeMonitorName, activeMonitorId) {
   if (!ipc || ipc.mapped === false) return false
