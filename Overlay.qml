@@ -37,6 +37,7 @@ Item {
   property bool handoffNeedsCover: false
   property bool activationCommitInProgress: false
   property bool activationCommitSettling: false
+  property bool activationCommitFinalizing: false
   property bool activationTargetSurfaceReady: false
   property int activationCommitAttempts: 0
   readonly property int activationCommitAttemptLimit: 50
@@ -415,6 +416,15 @@ Item {
     if (release) {
       Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = -1, action = "set", window = "address:' + release.address + '" })')
     }
+    root.raisePendingWindow()
+    if (!root.handoffRestoresTargetFirst)
+      root.restoreSelectedFullscreen()
+  }
+
+  function raisePendingWindow() {
+    const selected = root.pendingWindow
+    if (!selected)
+      return
     if (selected.groupIndex > 0) {
       Hyprland.dispatch('hl.dsp.group.active({ window = "address:' + selected.address + '", index = ' + selected.groupIndex + ' })')
     }
@@ -422,14 +432,13 @@ Item {
       selected.wayland.activate()
     Hyprland.dispatch('hl.dsp.focus({ window = "address:' + selected.address + '" })')
     Hyprland.dispatch('hl.dsp.window.bring_to_top()')
-    if (!root.handoffRestoresTargetFirst)
-      root.restoreSelectedFullscreen()
   }
 
   function abortActivationCommit() {
     activationCommitTimer.stop()
     activationSettleTimer.stop()
     activationRevealTimer.stop()
+    activationFinalizeTimer.stop()
     root.releaseHandoffAnimations()
     console.warn("window-switcher: selected window did not accept focus; keeping Orbit open")
     root.pendingWindow = null
@@ -439,6 +448,7 @@ Item {
     root.handoffNeedsCover = false
     root.activationCommitInProgress = false
     root.activationCommitSettling = false
+    root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
     root.releaseToActivate = false
@@ -447,10 +457,20 @@ Item {
   }
 
   function finishActivationCommit() {
+    if (root.activationCommitFinalizing)
+      return
     activationCommitTimer.stop()
     activationSettleTimer.stop()
     activationRevealTimer.stop()
+    root.activationCommitFinalizing = true
+    root.opened = false
+    activationFinalizeTimer.restart()
+  }
+
+  function finalizeActivationCommit() {
+    activationFinalizeTimer.stop()
     root.releaseHandoffAnimations()
+    root.raisePendingWindow()
     root.pendingWindow = null
     root.pendingFullscreenRelease = null
     root.pendingFullscreenRestore = null
@@ -458,9 +478,9 @@ Item {
     root.handoffNeedsCover = false
     root.activationCommitInProgress = false
     root.activationCommitSettling = false
+    root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
-    root.opened = false
   }
 
   function advanceActivationCommit() {
@@ -530,6 +550,7 @@ Item {
     root.pendingWindow = selected
     root.activationCommitInProgress = true
     root.activationCommitSettling = false
+    root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
     activationCommitTimer.restart()
@@ -639,6 +660,12 @@ Item {
     id: activationRevealTimer
     interval: 80
     onTriggered: root.finishActivationCommit()
+  }
+
+  Timer {
+    id: activationFinalizeTimer
+    interval: 32
+    onTriggered: root.finalizeActivationCommit()
   }
 
   LazyLoader {

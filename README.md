@@ -32,6 +32,8 @@ away and back without a tiled-layout flash.
 Exact-address activation is followed by an explicit raise and confirmed against
 Hyprland's active window before Orbit closes. This prevents a fullscreen or obscured
 window from swallowing Alt+Tab and leaving the user on the app they started from.
+Orbit repeats the raise after its keyboard-grabbing overlay has fully unmapped, avoiding
+the compositor restoring the old fullscreen surface above the newly active application.
 
 On this Hyprland tiling layout, focus can transfer the workspace's active maximized or
 fullscreen geometry, so the destination may still need to resize. Orbit starts that restore

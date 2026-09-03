@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rohan-patnaik.window-switcher",
   "name": "Orbit",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Rohan Patnaik",
   "license": "MIT",
   "description": "A three-mode visual window switcher for Omarchy Quattro.",

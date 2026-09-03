@@ -6,6 +6,7 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const bindings = fs.readFileSync(path.join(root, "bindings.lua"), "utf8");
 const overlay = fs.readFileSync(path.join(root, "Overlay.qml"), "utf8");
+const windowCard = fs.readFileSync(path.join(root, "components", "WindowCard.qml"), "utf8");
 
 test("Orbit owns Alt+Tab and preserves stock cycling on Super+Q", () => {
   assert.match(bindings, /hl\.unbind\("ALT \+ TAB"\)/);
@@ -49,11 +50,24 @@ test("exact-address activation raises the focused window and waits for confirmat
   assert.match(overlay, /selected window did not accept focus; keeping Orbit open/);
 });
 
+test("the selected window is raised again after the keyboard-grabbing layer unmaps", () => {
+  assert.match(
+    overlay,
+    /function finishActivationCommit\(\)[\s\S]*root\.opened = false[\s\S]*activationFinalizeTimer\.restart\(\)/
+  );
+  assert.match(
+    overlay,
+    /function finalizeActivationCommit\(\)[\s\S]*root\.releaseHandoffAnimations\(\)[\s\S]*root\.raisePendingWindow\(\)/
+  );
+  assert.match(overlay, /id: activationFinalizeTimer[\s\S]*interval: 32/);
+});
+
 test("fullscreen handoff stays covered and disables transient layout animation", () => {
   assert.match(overlay, /root\.activationCommitInProgress = true/);
   assert.match(overlay, /id: activationCommitTimer[\s\S]*root\.advanceActivationCommit\(\)/);
   assert.match(overlay, /root\.activationCommitInProgress \? WlrKeyboardFocus\.None : WlrKeyboardFocus\.Exclusive/);
-  assert.match(overlay, /function requestPendingActivation\(\)[\s\S]*internal = 0, client = -1[\s\S]*hl\.dsp\.focus[\s\S]*root\.restoreSelectedFullscreen\(\)/);
+  assert.match(overlay, /function requestPendingActivation\(\)[\s\S]*internal = 0, client = -1[\s\S]*root\.raisePendingWindow\(\)[\s\S]*root\.restoreSelectedFullscreen\(\)/);
+  assert.match(overlay, /function raisePendingWindow\(\)[\s\S]*hl\.dsp\.focus/);
   assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "true"/);
   assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "unset"/);
   assert.match(overlay, /root\.finishActivationCommit\(\)[\s\S]*root\.opened = false/);
@@ -70,6 +84,11 @@ test("resize-sensitive clients remain covered until their restored surface settl
   assert.match(overlay, /sourceItem: outgoingCapture[\s\S]*hideSource: true[\s\S]*live: !root\.activationCommitInProgress/);
   assert.match(overlay, /id: targetReadyProbe[\s\S]*live: true[\s\S]*onSourceSizeChanged: root\.observeActivationTargetSurface/);
   assert.match(overlay, /if \(root\.activationTargetSurfaceReady\)[\s\S]*return[\s\S]*activationRevealTimer\.restart\(\)/);
+});
+
+test("window previews do not disable their own screencopy source", () => {
+  assert.match(windowCard, /opacity: hasContent \? 1 : 0/);
+  assert.doesNotMatch(windowCard, /visible: hasContent/);
 });
 
 test("icon mode uses desktop metadata and groups application windows", () => {

@@ -52,7 +52,7 @@ Rectangle {
       paintCursor: false
       live: false
       constraintSize: Qt.size(Math.max(1, width), Math.max(1, height))
-      visible: hasContent
+      opacity: hasContent ? 1 : 0
     }
   }
 
