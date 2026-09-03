@@ -21,6 +21,13 @@ download icons. A unique application monogram is used only when no icon is avail
 Each switch session is built from one fresh Hyprland client query ordered by
 `focusHistoryID`. The active window is first, the last-used window is second, and
 releasing Alt activates the current selection, matching Windows-style MRU cycling.
+Orbit also preserves fullscreen and maximized state per window. Before focus moves,
+it temporarily separates Hyprland's layout state from the application's client-side
+fullscreen state, then restores the destination window's own state as one guarded
+activation transaction. Orbit keeps its overlay visible and suppresses handoff-only
+window animations until the destination is ready, so intermediate tiled geometry is
+never exposed. Fullscreen browser video therefore remains fullscreen when switching
+away and back without a tiled-layout flash.
 
 ## Requirements
 

@@ -17,6 +17,17 @@ test("safeAddress accepts only Hyprland hexadecimal addresses", () => {
   assert.equal(logic.safeAddress("address:0x12"), "");
 });
 
+test("fullscreen state normalization preserves valid Hyprland states", () => {
+  assert.equal(logic.fullscreenState(0), 0);
+  assert.equal(logic.fullscreenState(3), 3);
+  assert.equal(logic.fullscreenState(-1), 0);
+  assert.equal(logic.fullscreenState(4), 0);
+  assert.equal(logic.fullscreenState("2"), 2);
+  assert.equal(logic.resumableFullscreenState(2, 1), 2);
+  assert.equal(logic.resumableFullscreenState(0, 2), 2);
+  assert.equal(logic.resumableFullscreenState(0, 0), 0);
+});
+
 test("eligibility is limited to the current workspace or visible pinned windows", () => {
   assert.equal(logic.isEligibleWindow({ mapped: true }, 2, "DP-1", 1, 2, "DP-1", 1), true);
   assert.equal(logic.isEligibleWindow({ mapped: true }, 3, "DP-1", 1, 2, "DP-1", 1), false);

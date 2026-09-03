@@ -11,6 +11,16 @@ function focusHistoryId(value) {
   return Number.isFinite(number) && number >= 0 ? number : 2147483647
 }
 
+function fullscreenState(value) {
+  var number = Number(value)
+  return Number.isInteger(number) && number >= 0 && number <= 3 ? number : 0
+}
+
+function resumableFullscreenState(internalState, clientState) {
+  var internal = fullscreenState(internalState)
+  return internal > 0 ? internal : fullscreenState(clientState)
+}
+
 function isEligibleWindow(ipc, workspaceId, monitorName, monitorId,
     activeWorkspaceId, activeMonitorName, activeMonitorId) {
   if (!ipc || ipc.mapped === false) return false

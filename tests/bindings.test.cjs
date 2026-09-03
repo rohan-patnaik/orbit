@@ -31,6 +31,25 @@ test("the overlay snapshots the compositor MRU order before opening", () => {
   assert.doesNotMatch(overlay, /lastIpcObject/);
 });
 
+test("window activation preserves each app's compositor and client fullscreen state", () => {
+  assert.match(overlay, /fullscreenState: Logic\.fullscreenState\(ipc\.fullscreen\)/);
+  assert.match(overlay, /clientFullscreenState: Logic\.fullscreenState\(ipc\.fullscreenClient\)/);
+  assert.match(overlay, /fullscreen_state\(\{ internal = 0, client = -1/);
+  assert.match(overlay, /root\.prepareFullscreenHandoff/);
+  assert.match(overlay, /root\.restoreSelectedFullscreen\(\)/);
+});
+
+test("fullscreen handoff stays covered and disables transient layout animation", () => {
+  assert.match(overlay, /root\.activationCommitInProgress = true/);
+  assert.match(overlay, /id: activationCommitTimer[\s\S]*root\.advanceActivationCommit\(\)/);
+  assert.match(overlay, /root\.activationCommitInProgress \? WlrKeyboardFocus\.None : WlrKeyboardFocus\.Exclusive/);
+  assert.match(overlay, /function requestPendingActivation\(\)[\s\S]*internal = 0, client = -1[\s\S]*hl\.dsp\.focus[\s\S]*root\.restoreSelectedFullscreen\(\)/);
+  assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "true"/);
+  assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "unset"/);
+  assert.match(overlay, /root\.finishActivationCommit\(\)[\s\S]*root\.opened = false/);
+  assert.doesNotMatch(overlay, /id: fullscreenRestoreTimer/);
+});
+
 test("icon mode uses desktop metadata and groups application windows", () => {
   assert.match(overlay, /DesktopEntries\.heuristicLookup/);
   assert.match(overlay, /Logic\.applicationEntries/);

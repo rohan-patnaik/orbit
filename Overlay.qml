@@ -29,6 +29,12 @@ Item {
   property int snapshotMonitorId: -1
   property var targetScreen: null
   property var pendingWindow: null
+  property var pendingFullscreenRelease: null
+  property var pendingFullscreenRestore: null
+  property var rememberedFullscreenStates: ({})
+  property var handoffAnimationAddresses: []
+  property bool activationCommitInProgress: false
+  property int activationCommitAttempts: 0
   property bool snapshotPending: false
   property bool snapshotCancelled: false
   property bool pendingActivateOnRelease: false
@@ -163,6 +169,8 @@ Item {
         fallbackText: application.fallbackText,
         title: title,
         focusHistoryId: Logic.focusHistoryId(ipc.focusHistoryID),
+        fullscreenState: Logic.fullscreenState(ipc.fullscreen),
+        clientFullscreenState: Logic.fullscreenState(ipc.fullscreenClient),
         groupIndex: Logic.groupIndex(ipc.grouped, address),
         pinned: ipc.pinned === true,
         xwayland: ipc.xwayland === true,
@@ -301,18 +309,160 @@ Item {
       root.select(viewLoader.item.navigationTarget(root.selectedIndex, direction))
   }
 
+  function fullscreenSnapshot(window) {
+    if (!window)
+      return null
+    const internalState = Logic.fullscreenState(window.fullscreenState)
+    const clientState = Logic.fullscreenState(window.clientFullscreenState)
+    if (internalState === 0 && clientState === 0)
+      return null
+    return {
+      address: Logic.safeAddress(window.address),
+      internal: internalState,
+      client: clientState
+    }
+  }
+
+  function rememberSourceFullscreen(source) {
+    if (!source)
+      return
+    const address = Logic.safeAddress(source.address)
+    if (!address)
+      return
+    const remembered = Object.assign({}, root.rememberedFullscreenStates)
+    const snapshot = root.fullscreenSnapshot(source)
+    if (snapshot)
+      remembered[address] = snapshot
+    else
+      delete remembered[address]
+    root.rememberedFullscreenStates = remembered
+  }
+
+  function prepareFullscreenHandoff(source, selected) {
+    root.pendingFullscreenRelease = null
+    root.pendingFullscreenRestore = null
+    if (!source || !selected)
+      return
+    const sourceAddress = Logic.safeAddress(source.address)
+    const selectedAddress = Logic.safeAddress(selected.address)
+    if (!sourceAddress || !selectedAddress || sourceAddress === selectedAddress)
+      return
+    root.rememberSourceFullscreen(source)
+    const selectedSnapshot = root.rememberedFullscreenStates[selectedAddress] || root.fullscreenSnapshot(selected)
+    if (selectedSnapshot) {
+      root.pendingFullscreenRestore = {
+        address: selectedAddress,
+        internal: Logic.resumableFullscreenState(selectedSnapshot.internal, selectedSnapshot.client)
+      }
+    }
+
+    const suppressAnimations = Logic.fullscreenState(source.fullscreenState) > 0 || (root.pendingFullscreenRestore && root.pendingFullscreenRestore.internal > 0)
+    if (suppressAnimations)
+      root.suppressHandoffAnimations([sourceAddress, selectedAddress])
+
+    if (Logic.fullscreenState(source.fullscreenState) > 0) {
+      root.pendingFullscreenRelease = {
+        address: sourceAddress
+      }
+    }
+  }
+
+  function suppressHandoffAnimations(addresses) {
+    const uniqueAddresses = []
+    for (const value of addresses) {
+      const address = Logic.safeAddress(value)
+      if (!address || uniqueAddresses.includes(address))
+        continue
+      uniqueAddresses.push(address)
+      Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "true", window = "address:' + address + '" })')
+    }
+    root.handoffAnimationAddresses = uniqueAddresses
+  }
+
+  function releaseHandoffAnimations() {
+    for (const address of root.handoffAnimationAddresses) {
+      Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "unset", window = "address:' + address + '" })')
+    }
+    root.handoffAnimationAddresses = []
+  }
+
+  function restoreSelectedFullscreen() {
+    const restore = root.pendingFullscreenRestore
+    if (!restore || restore.internal <= 0)
+      return
+    Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = ' + restore.internal + ', client = -1, action = "set", window = "address:' + restore.address + '" })')
+  }
+
+  function requestPendingActivation() {
+    const selected = root.pendingWindow
+    if (!selected)
+      return
+    const release = root.pendingFullscreenRelease
+    if (release) {
+      Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = -1, action = "set", window = "address:' + release.address + '" })')
+    }
+    if (selected.groupIndex > 0) {
+      Hyprland.dispatch('hl.dsp.group.active({ window = "address:' + selected.address + '", index = ' + selected.groupIndex + ' })')
+    }
+    if (selected.wayland)
+      selected.wayland.activate()
+    Hyprland.dispatch('hl.dsp.focus({ window = "address:' + selected.address + '" })')
+    root.restoreSelectedFullscreen()
+  }
+
+  function finishActivationCommit() {
+    activationCommitTimer.stop()
+    root.releaseHandoffAnimations()
+    root.pendingWindow = null
+    root.pendingFullscreenRelease = null
+    root.pendingFullscreenRestore = null
+    root.activationCommitInProgress = false
+    root.activationCommitAttempts = 0
+    root.opened = false
+  }
+
+  function advanceActivationCommit() {
+    if (!root.activationCommitInProgress)
+      return
+    const selected = root.pendingWindow
+    if (!selected) {
+      root.finishActivationCommit()
+      return
+    }
+
+    root.activationCommitAttempts++
+    if (root.activationCommitAttempts === 1) {
+      root.requestPendingActivation()
+      return
+    }
+
+    const active = Hyprland.activeToplevel
+    const selectedIsActive = active && Logic.safeAddress(active.address) === Logic.safeAddress(selected.address)
+    if (!selectedIsActive) {
+      root.requestPendingActivation()
+      if (root.activationCommitAttempts < 8)
+        return
+    }
+
+    root.finishActivationCommit()
+  }
+
   function finish(activate) {
-    if (!root.opened)
+    if (!root.opened || root.activationCommitInProgress)
       return
     const selected = activate && root.selectedIndex >= 0 ? root.entries[root.selectedIndex] : null
     watchdog.stop()
     root.releaseToActivate = false
     root.releaseModifier = ""
-    root.opened = false
-    if (!selected)
+    if (!selected) {
+      root.opened = false
       return
+    }
+    root.prepareFullscreenHandoff(root.windows.length > 0 ? root.windows[0] : null, selected)
     root.pendingWindow = selected
-    activateTimer.restart()
+    root.activationCommitInProgress = true
+    root.activationCommitAttempts = 0
+    activationCommitTimer.restart()
   }
 
   function accept() {
@@ -403,34 +553,10 @@ Item {
   }
 
   Timer {
-    id: activateTimer
-    interval: 80
-    onTriggered: {
-      const selected = root.pendingWindow
-      if (!selected)
-        return
-      if (selected.wayland)
-        selected.wayland.activate()
-      focusFallbackTimer.restart()
-    }
-  }
-
-  Timer {
-    id: focusFallbackTimer
-    interval: 160
-    onTriggered: {
-      const selected = root.pendingWindow
-      root.pendingWindow = null
-      if (!selected)
-        return
-      const active = Hyprland.activeToplevel
-      if (active && String(active.address) === selected.address)
-        return
-      if (selected.groupIndex > 0) {
-        Hyprland.dispatch('hl.dsp.group.active({ window = "address:' + selected.address + '", index = ' + selected.groupIndex + ' })')
-      }
-      Hyprland.dispatch('hl.dsp.focus({ window = "address:' + selected.address + '" })')
-    }
+    id: activationCommitTimer
+    interval: 40
+    repeat: true
+    onTriggered: root.advanceActivationCommit()
   }
 
   LazyLoader {
@@ -450,7 +576,7 @@ Item {
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.namespace: "omarchy-window-switcher"
       WlrLayershell.layer: WlrLayer.Overlay
-      WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+      WlrLayershell.keyboardFocus: root.activationCommitInProgress ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
 
       Timer {
         id: modifierPollTimer
