@@ -1,8 +1,8 @@
 # Omarchy Orbit
 
-Orbit is a native Omarchy Quattro overlay for switching between windows visible in the
-current workspace. Grid and Flip keep separate windows from the same application as
-separate entries. Browser tabs are outside the plugin's scope.
+Orbit is a native Omarchy Quattro overlay for switching between windows visible across
+all connected monitors. Grid and Flip keep separate windows from the same application
+as separate entries. Browser tabs are outside the plugin's scope.
 
 The plugin provides three modes:
 
@@ -21,6 +21,11 @@ download icons. A unique application monogram is used only when no icon is avail
 Each switch session is built from one fresh Hyprland client query ordered by
 `focusHistoryID`. The active window is first, the last-used window is second, and
 releasing Alt activates the current selection, matching Windows-style MRU cycling.
+By default, Orbit combines the active workspace from every connected monitor into one
+MRU list, while keeping the overlay on the monitor where Alt+Tab was invoked. Selecting
+a window focuses it in place without moving it between monitors. Fullscreen handoffs
+are isolated per workspace, so a fullscreen window on one display is never resized or
+released merely because focus moved to another display.
 Orbit also preserves fullscreen and maximized state per window. Before focus moves,
 it temporarily separates Hyprland's layout state from the application's client-side
 fullscreen state, then restores the destination window's own state as one guarded
@@ -113,6 +118,22 @@ Removing the guarded include restores Omarchy's stock Alt+Tab behavior on the
 next Hyprland reload. Orbit retains the internal plugin ID
 `io.github.rohan-patnaik.window-switcher` so existing installations and saved
 mode preferences continue to work after the public rename.
+
+### Window scope
+
+The default `visible` scope matches a Windows-style extended desktop: Orbit includes
+the active workspace on every connected monitor. The plugin entry in
+`~/.config/omarchy/shell.json` can optionally set `scope` to `monitor` for only the
+invoking monitor, or `all` for every normal numbered workspace. Hidden special
+workspaces remain excluded from `all`.
+
+```json
+{
+  "id": "io.github.rohan-patnaik.window-switcher",
+  "mode": "grid",
+  "scope": "visible"
+}
+```
 
 ## Development checks
 

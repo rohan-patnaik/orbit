@@ -23,10 +23,14 @@ Item {
   property var windows: []
   property int selectedIndex: 0
   property string mode: "grid"
+  property string windowScope: "visible"
   readonly property var entries: root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
   property int snapshotWorkspaceId: -1
   property string snapshotMonitorName: ""
   property int snapshotMonitorId: -1
+  property var snapshotVisibleWorkspaceIds: []
+  property var snapshotVisibleMonitorNames: []
+  property var snapshotVisibleMonitorIds: []
   property var targetScreen: null
   property var pendingWindow: null
   property var pendingFullscreenRelease: null
@@ -129,6 +133,26 @@ Item {
     root.snapshotWorkspaceId = Number(workspace.id)
     root.snapshotMonitorName = String(monitor.name || "")
     root.snapshotMonitorId = Number(monitor.id)
+    const visibleWorkspaceIds = []
+    const visibleMonitorNames = []
+    const visibleMonitorIds = []
+    const monitors = Hyprland.monitors.values || []
+    for (const candidateMonitor of monitors) {
+      if (root.windowScope === "monitor" && Number(candidateMonitor.id) !== root.snapshotMonitorId)
+        continue
+      const monitorName = String(candidateMonitor.name || "")
+      const monitorId = Number(candidateMonitor.id)
+      const activeWorkspace = candidateMonitor.activeWorkspace
+      if (monitorName && !visibleMonitorNames.includes(monitorName))
+        visibleMonitorNames.push(monitorName)
+      if (Number.isFinite(monitorId) && !visibleMonitorIds.includes(monitorId))
+        visibleMonitorIds.push(monitorId)
+      if (activeWorkspace && Number(activeWorkspace.id) !== 0 && !visibleWorkspaceIds.includes(Number(activeWorkspace.id)))
+        visibleWorkspaceIds.push(Number(activeWorkspace.id))
+    }
+    root.snapshotVisibleWorkspaceIds = visibleWorkspaceIds
+    root.snapshotVisibleMonitorNames = visibleMonitorNames
+    root.snapshotVisibleMonitorIds = visibleMonitorIds
     root.targetScreen = root.focusedScreen()
     return true
   }
@@ -155,7 +179,7 @@ Item {
       const monitorName = toplevel && toplevel.monitor ? String(toplevel.monitor.name || "") : ""
       const monitorId = Number(ipc.monitor)
 
-      if (!Logic.isEligibleWindow(ipc, workspaceId, monitorName, monitorId, root.snapshotWorkspaceId, root.snapshotMonitorName, root.snapshotMonitorId)) {
+      if (!Logic.isEligibleWindow(ipc, workspaceId, monitorName, monitorId, root.windowScope, root.snapshotVisibleWorkspaceIds, root.snapshotVisibleMonitorNames, root.snapshotVisibleMonitorIds, root.snapshotWorkspaceId, root.snapshotMonitorName, root.snapshotMonitorId)) {
         continue
       }
 
@@ -168,6 +192,9 @@ Item {
       const size = Array.isArray(ipc.size) ? ipc.size : []
       rows.push({
         address: address,
+        workspaceId: workspaceId,
+        monitorName: monitorName,
+        monitorId: monitorId,
         appKey: application.id,
         applicationClass: applicationClass,
         appName: application.name,
@@ -222,6 +249,7 @@ Item {
 
   function startSwitcher(activateOnRelease, modifier, direction) {
     root.mode = root.configuredMode()
+    root.windowScope = root.configuredScope()
     if (!root.captureFocusContext())
       return
     root.snapshotPending = true
@@ -272,9 +300,16 @@ Item {
     return Logic.modeFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
+  function configuredScope() {
+    const config = root.shell ? root.shell.shellConfig : null
+    return Logic.scopeFromPluginEntries(config ? config.plugins : null, root.pluginId)
+  }
+
   onShellChanged: {
-    if (root.shell && !root.opened)
+    if (root.shell && !root.opened) {
       root.mode = root.configuredMode()
+      root.windowScope = root.configuredScope()
+    }
   }
 
   function cycle(step) {
@@ -356,6 +391,8 @@ Item {
     if (!sourceAddress || !selectedAddress || sourceAddress === selectedAddress)
       return
     root.rememberSourceFullscreen(source)
+    if (!Logic.sameWorkspace(source, selected))
+      return
     const selectedSnapshot = root.rememberedFullscreenStates[selectedAddress] || root.fullscreenSnapshot(selected)
     const desiredInternalState = selectedSnapshot ? Logic.resumableFullscreenState(selectedSnapshot.internal, selectedSnapshot.client) : 0
     if (selectedSnapshot) {
@@ -616,7 +653,7 @@ Item {
   GlobalShortcut {
     appid: "omarchy-window-switcher"
     name: "next"
-    description: "Cycle forward through current-workspace windows"
+    description: "Cycle forward through windows on visible monitors"
 
     onPressed: root.invokeShortcut(1)
   }
@@ -624,7 +661,7 @@ Item {
   GlobalShortcut {
     appid: "omarchy-window-switcher"
     name: "previous"
-    description: "Cycle backward through current-workspace windows"
+    description: "Cycle backward through windows on visible monitors"
 
     onPressed: root.invokeShortcut(-1)
   }

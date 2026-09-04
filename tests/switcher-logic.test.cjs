@@ -49,11 +49,29 @@ test("fullscreen handoff restores matching target state before focus transfer", 
   assert.equal(logic.dimensionsDiffer(1896, 1030, 941, 508, 2), true);
 });
 
-test("eligibility is limited to the current workspace or visible pinned windows", () => {
-  assert.equal(logic.isEligibleWindow({ mapped: true }, 2, "DP-1", 1, 2, "DP-1", 1), true);
-  assert.equal(logic.isEligibleWindow({ mapped: true }, 3, "DP-1", 1, 2, "DP-1", 1), false);
-  assert.equal(logic.isEligibleWindow({ mapped: true, pinned: true }, 3, "DP-1", 1, 2, "DP-1", 1), true);
-  assert.equal(logic.isEligibleWindow({ mapped: false }, 2, "DP-1", 1, 2, "DP-1", 1), false);
+test("visible scope includes every monitor's active workspace", () => {
+  const visibleWorkspaces = [1, 2];
+  const visibleMonitorNames = ["eDP-1", "HDMI-A-1"];
+  const visibleMonitorIds = [0, 1];
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 1, "HDMI-A-1", 1, "visible", visibleWorkspaces, visibleMonitorNames, visibleMonitorIds, 1, "HDMI-A-1", 1), true);
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 2, "eDP-1", 0, "visible", visibleWorkspaces, visibleMonitorNames, visibleMonitorIds, 1, "HDMI-A-1", 1), true);
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 3, "eDP-1", 0, "visible", visibleWorkspaces, visibleMonitorNames, visibleMonitorIds, 1, "HDMI-A-1", 1), false);
+  assert.equal(logic.isEligibleWindow({ mapped: true, pinned: true }, 3, "eDP-1", 0, "visible", visibleWorkspaces, visibleMonitorNames, visibleMonitorIds, 1, "HDMI-A-1", 1), true);
+  assert.equal(logic.isEligibleWindow({ mapped: false }, 2, "eDP-1", 0, "visible", visibleWorkspaces, visibleMonitorNames, visibleMonitorIds, 1, "HDMI-A-1", 1), false);
+});
+
+test("monitor and all-workspace scopes preserve their intended boundaries", () => {
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 1, "HDMI-A-1", 1, "monitor", [1, 2], ["eDP-1", "HDMI-A-1"], [0, 1], 1, "HDMI-A-1", 1), true);
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 2, "eDP-1", 0, "monitor", [1, 2], ["eDP-1", "HDMI-A-1"], [0, 1], 1, "HDMI-A-1", 1), false);
+  assert.equal(logic.isEligibleWindow({ mapped: true }, 8, "eDP-1", 0, "all", [], [], [], 1, "HDMI-A-1", 1), true);
+  assert.equal(logic.isEligibleWindow({ mapped: true }, -99, "eDP-1", 0, "all", [], [], [], 1, "HDMI-A-1", 1), false);
+  assert.equal(logic.normalizeScope("unexpected"), "visible");
+});
+
+test("fullscreen handoffs only couple windows on the same workspace", () => {
+  assert.equal(logic.sameWorkspace({ workspaceId: 1 }, { workspaceId: 1 }), true);
+  assert.equal(logic.sameWorkspace({ workspaceId: 1 }, { workspaceId: 2 }), false);
+  assert.equal(logic.sameWorkspace({}, {}), true);
 });
 
 test("windows are sorted by focus history", () => {
@@ -116,6 +134,16 @@ test("persisted mode comes from the matching plugin entry", () => {
   assert.equal(logic.modeFromPluginEntries(entries, "io.github.rohan-patnaik.window-switcher"), "flip");
   assert.equal(logic.modeFromPluginEntries([{ id: "io.github.rohan-patnaik.window-switcher", mode: "invalid" }], "io.github.rohan-patnaik.window-switcher"), "grid");
   assert.equal(logic.modeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "grid");
+});
+
+test("persisted scope comes from the matching plugin entry", () => {
+  const entries = [
+    { id: "another.plugin", scope: "monitor" },
+    { id: "io.github.rohan-patnaik.window-switcher", scope: "all" }
+  ];
+  assert.equal(logic.scopeFromPluginEntries(entries, "io.github.rohan-patnaik.window-switcher"), "all");
+  assert.equal(logic.scopeFromPluginEntries([{ id: "io.github.rohan-patnaik.window-switcher", scope: "bad" }], "io.github.rohan-patnaik.window-switcher"), "visible");
+  assert.equal(logic.scopeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "visible");
 });
 
 test("grid geometry preserves source aspect ratios and navigation wraps", () => {

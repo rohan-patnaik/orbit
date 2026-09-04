@@ -39,13 +39,53 @@ function dimensionsDiffer(firstWidth, firstHeight, secondWidth, secondHeight, to
     || Math.abs((Number(firstHeight) || 0) - (Number(secondHeight) || 0)) > limit
 }
 
-function isEligibleWindow(ipc, workspaceId, monitorName, monitorId,
+function listIncludesNumber(values, value) {
+  if (!Array.isArray(values)) return false
+  var target = Number(value)
+  for (var i = 0; i < values.length; i++) {
+    if (Number(values[i]) === target) return true
+  }
+  return false
+}
+
+function listIncludesString(values, value) {
+  if (!Array.isArray(values)) return false
+  var target = String(value || "")
+  if (!target) return false
+  for (var i = 0; i < values.length; i++) {
+    if (String(values[i] || "") === target) return true
+  }
+  return false
+}
+
+function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
+    visibleWorkspaceIds, visibleMonitorNames, visibleMonitorIds,
     activeWorkspaceId, activeMonitorName, activeMonitorId) {
   if (!ipc || ipc.mapped === false) return false
-  if (Number(workspaceId) === Number(activeWorkspaceId)) return true
+  var normalizedScope = normalizeScope(scope)
+  var workspace = Number(workspaceId)
+  if (normalizedScope === "all") return workspace > 0
+
+  if (normalizedScope === "monitor") {
+    if (workspace === Number(activeWorkspaceId)) return true
+    if (ipc.pinned !== true) return false
+    if (monitorName && activeMonitorName) return monitorName === activeMonitorName
+    return Number(monitorId) === Number(activeMonitorId)
+  }
+
+  if (listIncludesNumber(visibleWorkspaceIds, workspace)) return true
   if (ipc.pinned !== true) return false
-  if (monitorName && activeMonitorName) return monitorName === activeMonitorName
-  return Number(monitorId) === Number(activeMonitorId)
+  if (listIncludesString(visibleMonitorNames, monitorName)) return true
+  return listIncludesNumber(visibleMonitorIds, monitorId)
+}
+
+function sameWorkspace(first, second) {
+  if (!first || !second) return true
+  var firstId = Number(first.workspaceId)
+  var secondId = Number(second.workspaceId)
+  if (Number.isFinite(firstId) && Number.isFinite(secondId))
+    return firstId === secondId
+  return true
 }
 
 function sortByRecency(rows) {
@@ -166,6 +206,11 @@ function normalizeMode(value) {
   return mode === "icons" || mode === "flip" || mode === "grid" ? mode : "grid"
 }
 
+function normalizeScope(value) {
+  var scope = String(value || "").toLowerCase()
+  return scope === "monitor" || scope === "all" || scope === "visible" ? scope : "visible"
+}
+
 function modeFromPluginEntries(entries, pluginId) {
   if (!Array.isArray(entries)) return "grid"
   var id = String(pluginId || "")
@@ -174,6 +219,15 @@ function modeFromPluginEntries(entries, pluginId) {
       return normalizeMode(entries[i].mode)
   }
   return "grid"
+}
+
+function scopeFromPluginEntries(entries, pluginId) {
+  if (!Array.isArray(entries)) return "visible"
+  for (var i = 0; i < entries.length; i++) {
+    if (String(entries[i].id || "") === String(pluginId || ""))
+      return normalizeScope(entries[i].scope)
+  }
+  return "visible"
 }
 
 function previewAspect(width, height) {

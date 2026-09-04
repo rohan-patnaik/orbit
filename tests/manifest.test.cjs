@@ -13,7 +13,7 @@ test("manifest declares a persistent overlay", () => {
   assert.equal(manifest.schemaVersion, 1);
   assert.equal(manifest.id, "io.github.rohan-patnaik.window-switcher");
   assert.equal(manifest.name, "Orbit");
-  assert.equal(manifest.version, "0.2.2");
+  assert.equal(manifest.version, "0.3.0");
   assert.deepEqual(manifest.kinds, ["overlay"]);
   assert.equal(manifest.keepLoaded, true);
   assert.equal(manifest.entryPoints.overlay, "Overlay.qml");
