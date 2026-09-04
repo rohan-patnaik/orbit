@@ -146,6 +146,39 @@ test("persisted scope comes from the matching plugin entry", () => {
   assert.equal(logic.scopeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "visible");
 });
 
+test("Windows snap layouts expose six scale-aware arrangements", () => {
+  const layouts = logic.snapLayouts();
+  assert.equal(layouts.length, 6);
+  assert.equal(layouts[0].slots.length, 2);
+  assert.equal(layouts[5].slots.length, 4);
+  const left = logic.snapGeometry(layouts[0].slots[0], {
+    x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5,
+    reserved: [0, 0, 0, 26]
+  }, 10, 10);
+  const right = logic.snapGeometry(layouts[0].slots[1], {
+    x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5,
+    reserved: [0, 0, 0, 26]
+  }, 10, 10);
+  assert.deepEqual(JSON.parse(JSON.stringify(left)), { x: -1270, y: 10, width: 625, height: 674 });
+  assert.deepEqual(JSON.parse(JSON.stringify(right)), { x: -635, y: 10, width: 625, height: 674 });
+});
+
+test("window mode policy always retains a valid normal launch mode", () => {
+  const modes = logic.normalizedWindowModes({
+    defaultMode: "tiled", tiled: false, floating: false, maximized: false,
+    fullscreen: false, tiledFullscreen: false
+  });
+  assert.equal(modes.maximized, true);
+  assert.equal(modes.defaultMode, "maximized");
+  const toggled = logic.toggleWindowMode(logic.defaultWindowModes(), "maximized");
+  assert.equal(toggled.maximized, false);
+  assert.equal(toggled.defaultMode, "tiled");
+  const entries = [{ id: "io.github.rohan-patnaik.window-switcher", windowModes: {
+    defaultMode: "floating", tiled: false, floating: true, maximized: false
+  } }];
+  assert.equal(logic.windowModesFromPluginEntries(entries, "io.github.rohan-patnaik.window-switcher").defaultMode, "floating");
+});
+
 test("grid geometry preserves source aspect ratios and navigation wraps", () => {
   const rows = [
     { previewWidth: 1600, previewHeight: 900 },

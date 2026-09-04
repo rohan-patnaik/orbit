@@ -51,6 +51,24 @@ Item {
   property string pendingModifier: ""
   property int pendingDirection: 1
   property int queuedSteps: 0
+  property string managerMode: ""
+  property var windowModes: Logic.defaultWindowModes()
+  property var settingsDraft: Logic.defaultWindowModes()
+  property var snapLayouts: Logic.snapLayouts()
+  property int snapSelectedLayout: 0
+  property int snapSelectedSlot: 0
+  property var snapTargetWindow: null
+  property var snapTargetMonitor: null
+  property var snapClientRows: []
+  property var snapAssistCandidates: []
+  property var snapRemainingSlots: []
+  property int snapAssistSelected: 0
+  property bool snapActiveReady: false
+  property bool snapMonitorReady: false
+  property bool snapClientsReady: false
+  property var snapRestoreStates: ({})
+  property var snapAnimationAddresses: []
+  property string snapPendingFocusAddress: ""
 
   function applicationInfo(applicationClass, initialClass, appId) {
     const originalClass = String(applicationClass || "").trim()
@@ -209,6 +227,9 @@ Item {
         xwayland: ipc.xwayland === true,
         previewWidth: Number(size[0]) || 16,
         previewHeight: Number(size[1]) || 9,
+        positionX: Array.isArray(ipc.at) ? Number(ipc.at[0]) || 0 : 0,
+        positionY: Array.isArray(ipc.at) ? Number(ipc.at[1]) || 0 : 0,
+        floating: ipc.floating === true,
         toplevel: toplevel,
         wayland: wayland
       })
@@ -286,13 +307,32 @@ Item {
     const nextEntries = root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
     const matchingIndex = Logic.entryIndexForAddress(nextEntries, selectedAddress)
     root.selectedIndex = matchingIndex >= 0 ? matchingIndex : Math.min(root.selectedIndex, Math.max(0, nextEntries.length - 1))
-    if (root.shell && typeof root.shell.updateEntryInline === "function") {
-      root.shell.updateEntryInline(root.pluginId, {
-        id: root.pluginId,
-        mode: nextMode
-      })
-    }
+    root.persistPluginSettings({
+      mode: nextMode
+    })
     return root.mode
+  }
+
+  function currentPluginSettings() {
+    const config = root.shell ? root.shell.shellConfig : null
+    const plugins = config && Array.isArray(config.plugins) ? config.plugins : []
+    for (const plugin of plugins) {
+      if (plugin && String(plugin.id || "") === root.pluginId)
+        return JSON.parse(JSON.stringify(plugin))
+    }
+    return {
+      id: root.pluginId
+    }
+  }
+
+  function persistPluginSettings(changes) {
+    if (!root.shell || typeof root.shell.updateEntryInline !== "function")
+      return
+    const next = root.currentPluginSettings()
+    for (const key in changes)
+      next[key] = changes[key]
+    next.id = root.pluginId
+    root.shell.updateEntryInline(root.pluginId, next)
   }
 
   function configuredMode() {
@@ -305,11 +345,241 @@ Item {
     return Logic.scopeFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
+  function configuredWindowModes() {
+    const config = root.shell ? root.shell.shellConfig : null
+    return Logic.windowModesFromPluginEntries(config ? config.plugins : null, root.pluginId)
+  }
+
   onShellChanged: {
     if (root.shell && !root.opened) {
       root.mode = root.configuredMode()
       root.windowScope = root.configuredScope()
+      root.windowModes = root.configuredWindowModes()
     }
+  }
+
+  function openSettings() {
+    if (root.managerMode !== "") {
+      root.closeManager()
+      return
+    }
+    root.cancel()
+    root.windowScope = root.configuredScope()
+    if (!root.captureFocusContext())
+      return
+    root.windowModes = root.configuredWindowModes()
+    root.settingsDraft = Logic.normalizedWindowModes(root.windowModes)
+    root.managerMode = "settings"
+  }
+
+  function toggleSettingsMode(mode) {
+    root.settingsDraft = Logic.toggleWindowMode(root.settingsDraft, mode)
+  }
+
+  function setSettingsDefault(mode) {
+    const next = Logic.normalizedWindowModes(root.settingsDraft)
+    if (next[mode] !== true)
+      return
+    next.defaultMode = mode
+    root.settingsDraft = Logic.normalizedWindowModes(next)
+  }
+
+  function applyWindowModeSettings() {
+    root.windowModes = Logic.normalizedWindowModes(root.settingsDraft)
+    root.persistPluginSettings({
+      windowModes: root.windowModes
+    })
+    root.managerMode = ""
+    settingsReload.running = true
+  }
+
+  function closeManager() {
+    root.managerMode = ""
+    root.snapTargetWindow = null
+    root.snapTargetMonitor = null
+    root.snapClientRows = []
+    root.snapAssistCandidates = []
+    root.snapRemainingSlots = []
+  }
+
+  function openSnapManager() {
+    if (root.managerMode !== "") {
+      root.closeManager()
+      return
+    }
+    root.cancel()
+    root.windowScope = root.configuredScope()
+    if (!root.captureFocusContext())
+      return
+    root.snapSelectedLayout = 0
+    root.snapSelectedSlot = 0
+    root.snapTargetWindow = null
+    root.snapTargetMonitor = null
+    root.snapClientRows = []
+    root.snapAssistCandidates = []
+    root.snapRemainingSlots = []
+    root.snapActiveReady = false
+    root.snapMonitorReady = false
+    root.snapClientsReady = false
+    snapActiveQuery.running = true
+    snapMonitorQuery.running = true
+    snapClientsQuery.running = true
+  }
+
+  function completeSnapActive(text) {
+    try {
+      const active = JSON.parse(text)
+      const address = Logic.safeAddress(active.address)
+      if (address) {
+        root.snapTargetWindow = {
+          address: address,
+          workspaceId: Number(active.workspace ? active.workspace.id : -1),
+          monitorId: Number(active.monitor),
+          positionX: Array.isArray(active.at) ? Number(active.at[0]) || 0 : 0,
+          positionY: Array.isArray(active.at) ? Number(active.at[1]) || 0 : 0,
+          previewWidth: Array.isArray(active.size) ? Number(active.size[0]) || 1 : 1,
+          previewHeight: Array.isArray(active.size) ? Number(active.size[1]) || 1 : 1,
+          fullscreenState: Logic.fullscreenState(active.fullscreen),
+          clientFullscreenState: Logic.fullscreenState(active.fullscreenClient),
+          floating: active.floating === true
+        }
+      }
+    } catch (error) {
+      console.warn("window-switcher: unable to read active window for snap:", error)
+    }
+    root.snapActiveReady = true
+    root.maybeOpenSnapManager()
+  }
+
+  function completeSnapMonitors(text) {
+    try {
+      const monitors = JSON.parse(text)
+      const monitorId = root.snapTargetWindow ? root.snapTargetWindow.monitorId : root.snapshotMonitorId
+      for (const monitor of monitors) {
+        if (Number(monitor.id) === Number(monitorId)) {
+          root.snapTargetMonitor = monitor
+          root.snapshotMonitorName = String(monitor.name || root.snapshotMonitorName)
+          root.targetScreen = root.focusedScreen()
+          break
+        }
+      }
+    } catch (error) {
+      console.warn("window-switcher: unable to read monitors for snap:", error)
+    }
+    root.snapMonitorReady = true
+    root.maybeOpenSnapManager()
+  }
+
+  function completeSnapClients(text) {
+    try {
+      root.snapClientRows = root.snapshotCurrentWindows(JSON.parse(text))
+    } catch (error) {
+      console.warn("window-switcher: unable to read clients for snap:", error)
+      root.snapClientRows = []
+    }
+    root.snapClientsReady = true
+    root.maybeOpenSnapManager()
+  }
+
+  function maybeOpenSnapManager() {
+    if (!root.snapActiveReady || !root.snapMonitorReady || !root.snapClientsReady)
+      return
+    if (!root.snapTargetWindow || !root.snapTargetMonitor) {
+      console.warn("window-switcher: snap layouts need an active window and monitor")
+      return
+    }
+    root.managerMode = "snap"
+  }
+
+  function snapGeometry(layoutIndex, slotIndex) {
+    const layout = root.snapLayouts[layoutIndex]
+    if (!layout || !layout.slots[slotIndex])
+      return null
+    const compositorGap = Style.gapsOut * 2
+    return Logic.snapGeometry(layout.slots[slotIndex], root.snapTargetMonitor, compositorGap, compositorGap)
+  }
+
+  function rememberSnapState(window) {
+    if (!window || !window.address || root.snapRestoreStates[window.address])
+      return
+    const saved = Object.assign({}, root.snapRestoreStates)
+    saved[window.address] = {
+      x: window.positionX,
+      y: window.positionY,
+      width: window.previewWidth,
+      height: window.previewHeight,
+      floating: window.floating,
+      fullscreen: window.fullscreenState,
+      clientFullscreen: window.clientFullscreenState
+    }
+    root.snapRestoreStates = saved
+  }
+
+  function snapWindow(window, layoutIndex, slotIndex) {
+    const geometry = root.snapGeometry(layoutIndex, slotIndex)
+    const address = window ? Logic.safeAddress(window.address) : ""
+    if (!geometry || !address)
+      return false
+    root.rememberSnapState(window)
+    Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "true", window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = 0, action = "set", window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.float({ action = "set", window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.move({ x = ' + geometry.x + ', y = ' + geometry.y + ', relative = false, window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.resize({ x = ' + geometry.width + ', y = ' + geometry.height + ', relative = false, window = "address:' + address + '" })')
+    const animationAddresses = root.snapAnimationAddresses.slice()
+    if (!animationAddresses.includes(address))
+      animationAddresses.push(address)
+    root.snapAnimationAddresses = animationAddresses
+    snapAnimationRelease.restart()
+    root.snapPendingFocusAddress = address
+    return true
+  }
+
+  function chooseSnapSlot(layoutIndex, slotIndex) {
+    if (!root.snapWindow(root.snapTargetWindow, layoutIndex, slotIndex))
+      return
+    const layout = root.snapLayouts[layoutIndex]
+    const remaining = []
+    for (let index = 0; index < layout.slots.length; index++) {
+      if (index !== slotIndex)
+        remaining.push(index)
+    }
+    root.snapRemainingSlots = remaining
+    root.snapAssistCandidates = root.snapClientRows.filter(window => window.address !== root.snapTargetWindow.address && window.workspaceId === root.snapTargetWindow.workspaceId)
+    root.snapAssistSelected = 0
+    if (remaining.length > 0 && root.snapAssistCandidates.length > 0)
+      root.managerMode = "assist"
+    else {
+      root.managerMode = ""
+      snapFocusTimer.restart()
+    }
+  }
+
+  function chooseSnapAssist(index) {
+    if (index < 0 || index >= root.snapAssistCandidates.length || root.snapRemainingSlots.length === 0)
+      return
+    const candidate = root.snapAssistCandidates[index]
+    const slotIndex = root.snapRemainingSlots[0]
+    if (!root.snapWindow(candidate, root.snapSelectedLayout, slotIndex))
+      return
+    root.snapRemainingSlots = root.snapRemainingSlots.slice(1)
+    root.snapAssistCandidates = root.snapAssistCandidates.filter(window => window.address !== candidate.address)
+    root.snapAssistSelected = Math.min(root.snapAssistSelected, Math.max(0, root.snapAssistCandidates.length - 1))
+    if (root.snapRemainingSlots.length === 0 || root.snapAssistCandidates.length === 0) {
+      root.managerMode = ""
+      snapFocusTimer.restart()
+    }
+  }
+
+  function cycleSnapSlot(step) {
+    const layout = root.snapLayouts[root.snapSelectedLayout]
+    root.snapSelectedSlot = Logic.wrapIndex(root.snapSelectedSlot + step, layout.slots.length)
+  }
+
+  function cycleSnapLayout(step) {
+    root.snapSelectedLayout = Logic.wrapIndex(root.snapSelectedLayout + step, root.snapLayouts.length)
+    const layout = root.snapLayouts[root.snapSelectedLayout]
+    root.snapSelectedSlot = Math.min(root.snapSelectedSlot, layout.slots.length - 1)
   }
 
   function cycle(step) {
@@ -650,6 +920,35 @@ Item {
     }
   }
 
+  Process {
+    id: snapActiveQuery
+    command: ["hyprctl", "-j", "activewindow"]
+    stdout: StdioCollector {
+      onStreamFinished: root.completeSnapActive(text)
+    }
+  }
+
+  Process {
+    id: snapMonitorQuery
+    command: ["hyprctl", "-j", "monitors"]
+    stdout: StdioCollector {
+      onStreamFinished: root.completeSnapMonitors(text)
+    }
+  }
+
+  Process {
+    id: snapClientsQuery
+    command: ["hyprctl", "-j", "clients"]
+    stdout: StdioCollector {
+      onStreamFinished: root.completeSnapClients(text)
+    }
+  }
+
+  Process {
+    id: settingsReload
+    command: ["hyprctl", "reload"]
+  }
+
   GlobalShortcut {
     appid: "omarchy-window-switcher"
     name: "next"
@@ -664,6 +963,22 @@ Item {
     description: "Cycle backward through windows on visible monitors"
 
     onPressed: root.invokeShortcut(-1)
+  }
+
+  GlobalShortcut {
+    appid: "omarchy-window-switcher"
+    name: "snap"
+    description: "Choose a Windows-style snap layout for the active window"
+
+    onPressed: root.openSnapManager()
+  }
+
+  GlobalShortcut {
+    appid: "omarchy-window-switcher"
+    name: "settings"
+    description: "Configure Orbit window modes"
+
+    onPressed: root.openSettings()
   }
 
   Connections {
@@ -703,6 +1018,212 @@ Item {
     id: activationFinalizeTimer
     interval: 32
     onTriggered: root.finalizeActivationCommit()
+  }
+
+  Timer {
+    id: snapAnimationRelease
+    interval: 120
+    onTriggered: {
+      for (const address of root.snapAnimationAddresses)
+        Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "unset", window = "address:' + address + '" })')
+      root.snapAnimationAddresses = []
+    }
+  }
+
+  Timer {
+    id: snapFocusTimer
+    interval: 32
+    onTriggered: {
+      const address = Logic.safeAddress(root.snapPendingFocusAddress)
+      root.snapPendingFocusAddress = ""
+      if (!address)
+        return
+      Hyprland.dispatch('hl.dsp.focus({ window = "address:' + address + '" })')
+      Hyprland.dispatch("hl.dsp.window.bring_to_top()")
+    }
+  }
+
+  LazyLoader {
+    active: root.managerMode !== ""
+
+    PanelWindow {
+      id: managerPanel
+
+      screen: root.targetScreen
+      anchors {
+        top: true
+        bottom: true
+        left: true
+        right: true
+      }
+      color: "transparent"
+      exclusionMode: ExclusionMode.Ignore
+      WlrLayershell.namespace: "omarchy-orbit-window-manager"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+
+      Rectangle {
+        anchors.fill: parent
+        color: Color.menu.scrim
+
+        TapHandler {
+          onTapped: root.closeManager()
+        }
+      }
+
+      Rectangle {
+        id: managerCard
+
+        anchors.centerIn: parent
+        width: root.managerMode === "settings" ? Style.space(560) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
+        height: root.managerMode === "settings" ? Style.space(430) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(330)
+        radius: Style.cornerRadius * 2
+        color: Color.menu.background
+        border.width: 1
+        border.color: Color.menu.border
+        focus: true
+
+        Keys.onPressed: event => {
+          if (event.key === Qt.Key_Escape) {
+            root.closeManager()
+          } else if (root.managerMode === "snap") {
+            if (event.key === Qt.Key_Left || event.key === Qt.Key_Backtab)
+              root.cycleSnapSlot(-1)
+            else if (event.key === Qt.Key_Right || event.key === Qt.Key_Tab)
+              root.cycleSnapSlot(1)
+            else if (event.key === Qt.Key_Up)
+              root.cycleSnapLayout(-1)
+            else if (event.key === Qt.Key_Down)
+              root.cycleSnapLayout(1)
+            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+              root.chooseSnapSlot(root.snapSelectedLayout, root.snapSelectedSlot)
+            else
+              return
+          } else if (root.managerMode === "assist") {
+            if (event.key === Qt.Key_Left || event.key === Qt.Key_Up || event.key === Qt.Key_Backtab)
+              root.snapAssistSelected = Logic.wrapIndex(root.snapAssistSelected - 1, root.snapAssistCandidates.length)
+            else if (event.key === Qt.Key_Right || event.key === Qt.Key_Down || event.key === Qt.Key_Tab)
+              root.snapAssistSelected = Logic.wrapIndex(root.snapAssistSelected + 1, root.snapAssistCandidates.length)
+            else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space)
+              root.chooseSnapAssist(root.snapAssistSelected)
+            else
+              return
+          } else {
+            return
+          }
+          event.accepted = true
+        }
+
+        Text {
+          id: managerHeading
+
+          anchors {
+            top: parent.top
+            topMargin: Style.space(18)
+            horizontalCenter: parent.horizontalCenter
+          }
+          text: root.managerMode === "settings" ? "Orbit · Window modes" : root.managerMode === "assist" ? "Orbit · Snap Assist" : "Orbit · Snap layouts"
+          color: Color.menu.text
+          font.family: Style.font.menuFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+
+        Loader {
+          anchors {
+            top: managerHeading.bottom
+            topMargin: Style.space(16)
+            bottom: parent.bottom
+            bottomMargin: Style.space(18)
+            left: parent.left
+            leftMargin: Style.space(20)
+            right: parent.right
+            rightMargin: Style.space(20)
+          }
+          sourceComponent: root.managerMode === "settings" ? settingsComponent : root.managerMode === "assist" ? snapAssistComponent : snapPickerComponent
+        }
+
+        Component {
+          id: snapPickerComponent
+
+          Column {
+            spacing: Style.space(14)
+
+            SnapLayoutPicker {
+              anchors.horizontalCenter: parent.horizontalCenter
+              layouts: root.snapLayouts
+              selectedLayout: root.snapSelectedLayout
+              selectedSlot: root.snapSelectedSlot
+              onSlotHovered: (layoutIndex, slotIndex) => {
+                root.snapSelectedLayout = layoutIndex
+                root.snapSelectedSlot = slotIndex
+              }
+              onSlotRequested: (layoutIndex, slotIndex) => {
+                root.snapSelectedLayout = layoutIndex
+                root.snapSelectedSlot = slotIndex
+                root.chooseSnapSlot(layoutIndex, slotIndex)
+              }
+            }
+
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: "Arrows choose · Enter snaps · Esc cancels"
+              color: Color.menu.text
+              opacity: 0.55
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+
+        Component {
+          id: settingsComponent
+
+          WindowModeSettings {
+            width: parent ? parent.width : 0
+            modes: root.settingsDraft
+            onToggleRequested: mode => root.toggleSettingsMode(mode)
+            onDefaultRequested: mode => root.setSettingsDefault(mode)
+            onApplyRequested: root.applyWindowModeSettings()
+            onCancelRequested: root.closeManager()
+          }
+        }
+
+        Component {
+          id: snapAssistComponent
+
+          Column {
+            spacing: Style.space(12)
+
+            Text {
+              width: parent.width
+              text: "Pick a window for the next open zone. Continue until the layout is filled, or press Esc."
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              horizontalAlignment: Text.AlignHCenter
+              color: Color.menu.text
+              opacity: 0.65
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            GridView {
+              anchors.horizontalCenter: parent.horizontalCenter
+              maximumWidth: managerCard.width - Style.space(56)
+              maximumHeight: managerCard.height - Style.space(130)
+              windows: root.snapAssistCandidates
+              selectedIndex: root.snapAssistSelected
+              hoverArmed: true
+              onSelectRequested: index => root.snapAssistSelected = index
+              onActivateRequested: index => {
+                root.snapAssistSelected = index
+                root.chooseSnapAssist(index)
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   LazyLoader {

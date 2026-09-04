@@ -230,6 +230,120 @@ function scopeFromPluginEntries(entries, pluginId) {
   return "visible"
 }
 
+function snapLayouts() {
+  return [
+    { id: "halves", label: "Halves", slots: [
+      { x: 0, y: 0, width: 0.5, height: 1 },
+      { x: 0.5, y: 0, width: 0.5, height: 1 }
+    ] },
+    { id: "wide-left", label: "Two thirds", slots: [
+      { x: 0, y: 0, width: 2 / 3, height: 1 },
+      { x: 2 / 3, y: 0, width: 1 / 3, height: 1 }
+    ] },
+    { id: "main-left", label: "Main and stack", slots: [
+      { x: 0, y: 0, width: 0.5, height: 1 },
+      { x: 0.5, y: 0, width: 0.5, height: 0.5 },
+      { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
+    ] },
+    { id: "thirds", label: "Thirds", slots: [
+      { x: 0, y: 0, width: 1 / 3, height: 1 },
+      { x: 1 / 3, y: 0, width: 1 / 3, height: 1 },
+      { x: 2 / 3, y: 0, width: 1 / 3, height: 1 }
+    ] },
+    { id: "wide-center", label: "Wide center", slots: [
+      { x: 0, y: 0, width: 0.25, height: 1 },
+      { x: 0.25, y: 0, width: 0.5, height: 1 },
+      { x: 0.75, y: 0, width: 0.25, height: 1 }
+    ] },
+    { id: "quarters", label: "Quarters", slots: [
+      { x: 0, y: 0, width: 0.5, height: 0.5 },
+      { x: 0.5, y: 0, width: 0.5, height: 0.5 },
+      { x: 0, y: 0.5, width: 0.5, height: 0.5 },
+      { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
+    ] }
+  ]
+}
+
+function snapGeometry(slot, monitor, outerGap, innerGap) {
+  var safeSlot = slot || { x: 0, y: 0, width: 1, height: 1 }
+  var safeMonitor = monitor || {}
+  var scale = Number(safeMonitor.scale)
+  if (!Number.isFinite(scale) || scale <= 0) scale = 1
+  var reserved = Array.isArray(safeMonitor.reserved) ? safeMonitor.reserved : []
+  var leftReserved = Number(reserved[0]) || 0
+  var topReserved = Number(reserved[1]) || 0
+  var rightReserved = Number(reserved[2]) || 0
+  var bottomReserved = Number(reserved[3]) || 0
+  var outer = Math.max(0, Number(outerGap) || 0)
+  var inner = Math.max(0, Number(innerGap) || 0)
+  var areaX = (Number(safeMonitor.x) || 0) + leftReserved + outer
+  var areaY = (Number(safeMonitor.y) || 0) + topReserved + outer
+  var areaWidth = Math.max(1, (Number(safeMonitor.width) || 1) / scale - leftReserved - rightReserved - outer * 2)
+  var areaHeight = Math.max(1, (Number(safeMonitor.height) || 1) / scale - topReserved - bottomReserved - outer * 2)
+  var startX = areaX + Number(safeSlot.x || 0) * areaWidth
+  var startY = areaY + Number(safeSlot.y || 0) * areaHeight
+  var endX = areaX + (Number(safeSlot.x || 0) + Number(safeSlot.width || 1)) * areaWidth
+  var endY = areaY + (Number(safeSlot.y || 0) + Number(safeSlot.height || 1)) * areaHeight
+  if (Number(safeSlot.x || 0) > 0) startX += inner / 2
+  if (Number(safeSlot.y || 0) > 0) startY += inner / 2
+  if (Number(safeSlot.x || 0) + Number(safeSlot.width || 1) < 0.9999) endX -= inner / 2
+  if (Number(safeSlot.y || 0) + Number(safeSlot.height || 1) < 0.9999) endY -= inner / 2
+  return {
+    x: Math.round(startX),
+    y: Math.round(startY),
+    width: Math.max(1, Math.round(endX - startX)),
+    height: Math.max(1, Math.round(endY - startY))
+  }
+}
+
+function defaultWindowModes() {
+  return {
+    defaultMode: "maximized",
+    tiled: true,
+    floating: true,
+    maximized: true,
+    fullscreen: true,
+    tiledFullscreen: true
+  }
+}
+
+function normalizedWindowModes(value) {
+  var defaults = defaultWindowModes()
+  var source = value && typeof value === "object" ? value : {}
+  var result = {
+    defaultMode: String(source.defaultMode || defaults.defaultMode),
+    tiled: source.tiled === undefined ? defaults.tiled : source.tiled === true,
+    floating: source.floating === undefined ? defaults.floating : source.floating === true,
+    maximized: source.maximized === undefined ? defaults.maximized : source.maximized === true,
+    fullscreen: source.fullscreen === undefined ? defaults.fullscreen : source.fullscreen === true,
+    tiledFullscreen: source.tiledFullscreen === undefined ? defaults.tiledFullscreen : source.tiledFullscreen === true
+  }
+  if (!result.tiled && !result.floating && !result.maximized)
+    result.maximized = true
+  if ((result.defaultMode !== "tiled" && result.defaultMode !== "floating" && result.defaultMode !== "maximized") || !result[result.defaultMode]) {
+    result.defaultMode = result.maximized ? "maximized" : result.tiled ? "tiled" : "floating"
+  }
+  return result
+}
+
+function windowModesFromPluginEntries(entries, pluginId) {
+  if (!Array.isArray(entries)) return defaultWindowModes()
+  for (var i = 0; i < entries.length; i++) {
+    if (String(entries[i].id || "") === String(pluginId || ""))
+      return normalizedWindowModes(entries[i].windowModes)
+  }
+  return defaultWindowModes()
+}
+
+function toggleWindowMode(value, mode) {
+  var current = normalizedWindowModes(value)
+  if (!(mode in current) || mode === "defaultMode") return current
+  var next = {}
+  for (var key in current) next[key] = current[key]
+  next[mode] = !next[mode]
+  return normalizedWindowModes(next)
+}
+
 function previewAspect(width, height) {
   var w = Number(width)
   var h = Number(height)

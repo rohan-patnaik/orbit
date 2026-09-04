@@ -17,6 +17,34 @@ test("Orbit owns Alt+Tab and preserves stock cycling on Super+Q", () => {
   assert.match(bindings, /"SUPER \+ SHIFT \+ Q"[\s\S]*cycle_next\(\{ next = false \}\)/);
 });
 
+test("Orbit exposes Windows-style snap layouts and a window-mode policy", () => {
+  assert.match(bindings, /orbit_window_modes/);
+  assert.match(bindings, /o\.window\("\.\*", \{ maximize = true \}\)/);
+  assert.match(bindings, /hl\.unbind\("SUPER \+ T"\)/);
+  assert.match(bindings, /hl\.unbind\("SUPER \+ F"\)/);
+  assert.match(bindings, /hl\.unbind\("SUPER \+ CTRL \+ F"\)/);
+  assert.match(bindings, /hl\.unbind\("SUPER \+ ALT \+ F"\)/);
+  assert.match(bindings, /"SUPER \+ Z"[\s\S]*omarchy-window-switcher:snap/);
+  assert.match(bindings, /"SUPER \+ SHIFT \+ Z"[\s\S]*omarchy-window-switcher:settings/);
+});
+
+test("snap placement uses exact-address compositor operations and Snap Assist", () => {
+  assert.match(overlay, /name: "snap"[\s\S]*root\.openSnapManager\(\)/);
+  assert.match(overlay, /fullscreen_state\(\{ internal = 0, client = 0/);
+  assert.match(overlay, /window\.float\(\{ action = "set"/);
+  assert.match(overlay, /window\.move\(\{ x = '[^\n]*relative = false/);
+  assert.match(overlay, /window\.resize\(\{ x = '[^\n]*relative = false/);
+  assert.match(overlay, /root\.managerMode = "assist"/);
+  assert.match(overlay, /root\.snapAssistCandidates\.filter/);
+});
+
+test("plugin settings are merged so mode, scope, and window policy survive each save", () => {
+  assert.match(overlay, /function currentPluginSettings\(\)/);
+  assert.match(overlay, /function persistPluginSettings\(changes\)/);
+  assert.match(overlay, /root\.persistPluginSettings\(\{\s*mode: nextMode\s*\}\)/);
+  assert.match(overlay, /root\.persistPluginSettings\(\{\s*windowModes: root\.windowModes\s*\}\)/);
+});
+
 test("the overlay cycles backward and activates when Alt is released", () => {
   assert.match(overlay, /name: "previous"[\s\S]*root\.invokeShortcut\(-1\)/);
   assert.match(overlay, /hl\.is_key_down\("Alt_L"\)[\s\S]*hl\.is_key_down\("Alt_R"\)/);

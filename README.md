@@ -11,6 +11,16 @@ The plugin provides three modes:
 - **Flip** — an angled stack of window previews.
 - **Grid** — an adaptive, aspect-aware thumbnail grid and the default mode.
 
+Orbit also adds a Windows-inspired desktop layout layer:
+
+- **Snap Layouts** — `Super+Z` opens six layouts on the active window's current
+  monitor, including halves, thirds, a main-plus-stack layout, and quarters.
+- **Snap Assist** — after placing the active window, Orbit offers the other
+  windows on that workspace for the remaining zones.
+- **Window modes** — `Super+Shift+Z` chooses the default launch mode and can
+  disable Omarchy's tiled, floating, full-width, fullscreen, or tiled-fullscreen
+  shortcuts. At least one normal window mode always remains enabled.
+
 Grid and Flip use bounded, one-frame Quickshell window captures. Grid sizes each
 card to the source window's aspect ratio, so the full capture fills the preview
 without cropping, stretching, or letterboxing. Captures are released when the
@@ -92,6 +102,10 @@ cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
 - Use `Alt+Shift+Tab`, `Shift+Tab`, Left, or Up to move backward.
 - Use `Tab`, Right, or Down to move forward.
 - Use `Super+Q` or `Super+Shift+Q` for Omarchy's original direct window cycle.
+- Press `Super+Z` to choose a snap layout for the active window. Click a zone or
+  choose it with the arrow keys and Enter; Snap Assist then fills the open zones.
+- Press `Super+Shift+Z` to choose the default launch mode and enabled window-mode
+  shortcuts. Changes take effect on the next window after Hyprland reloads.
 - Press `1`, `2`, or `3` to select Icons, Flip, or Grid. The choice is saved in
   `~/.config/omarchy/shell.json`.
 - Press Enter or Space, or click a window, to activate it.
@@ -131,9 +145,21 @@ workspaces remain excluded from `all`.
 {
   "id": "io.github.rohan-patnaik.window-switcher",
   "mode": "grid",
-  "scope": "visible"
+  "scope": "visible",
+  "windowModes": {
+    "defaultMode": "maximized",
+    "tiled": true,
+    "floating": true,
+    "maximized": true,
+    "fullscreen": true,
+    "tiledFullscreen": true
+  }
 }
 ```
+
+The window-mode policy controls Orbit's default launch rule and the standard
+Omarchy shortcuts. It intentionally does not reject application-requested
+fullscreen, so browser video, games, and presentation software keep working.
 
 ## Development checks
 

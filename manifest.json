@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.rohan-patnaik.window-switcher",
   "name": "Orbit",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "author": "Rohan Patnaik",
   "license": "MIT",
-  "description": "A three-mode visual window switcher for Omarchy Quattro.",
+  "description": "Windows-style multi-monitor switching and snap layouts for Omarchy Quattro.",
   "kinds": [
     "overlay"
   ],
