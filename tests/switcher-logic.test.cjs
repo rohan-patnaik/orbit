@@ -146,6 +146,19 @@ test("persisted scope comes from the matching plugin entry", () => {
   assert.equal(logic.scopeFromPluginEntries([], "io.github.rohan-patnaik.window-switcher"), "visible");
 });
 
+test("Alt+Tab targets the primary display independently of the focused display", () => {
+  const monitors = [
+    { id: 0, name: "eDP-1", x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5 },
+    { id: 1, name: "HDMI-A-1", x: 0, y: 0, width: 1920, height: 1080, scale: 1 }
+  ];
+  const id = "io.github.rohan-patnaik.window-switcher";
+  assert.equal(logic.primaryMonitorName(monitors), "HDMI-A-1");
+  assert.equal(logic.overlayMonitorName([], id, monitors, "eDP-1"), "HDMI-A-1");
+  assert.equal(logic.overlayMonitorName([{ id, overlayMonitor: "focused" }], id, monitors, "eDP-1"), "eDP-1");
+  assert.equal(logic.overlayMonitorName([{ id, overlayMonitor: "HDMI-A-1" }], id, monitors, "eDP-1"), "HDMI-A-1");
+  assert.equal(logic.overlayMonitorName([{ id, overlayMonitor: "missing" }], id, monitors, "eDP-1"), "HDMI-A-1");
+});
+
 test("Windows snap layouts expose six scale-aware arrangements", () => {
   const layouts = logic.snapLayouts();
   assert.equal(layouts.length, 6);

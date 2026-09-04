@@ -45,6 +45,22 @@ test("plugin settings are merged so mode, scope, and window policy survive each 
   assert.match(overlay, /root\.persistPluginSettings\(\{\s*windowModes: root\.windowModes\s*\}\)/);
 });
 
+test("Alt+Tab always renders on the configured primary display", () => {
+  assert.match(overlay, /function switcherScreen\(\)/);
+  assert.match(overlay, /for \(const monitor of Hyprland\.monitors\.values \|\| \[\]\)[\s\S]*monitors\.push\(monitor\)/);
+  assert.match(overlay, /Logic\.overlayMonitorName/);
+  assert.match(overlay, /function startSwitcher[\s\S]*root\.targetScreen = root\.switcherScreen\(\)/);
+  assert.match(overlay, /function openSnapManager[\s\S]*root\.captureFocusContext\(\)/);
+});
+
+test("Snap Groups are remembered and raised together during Alt+Tab activation", () => {
+  assert.match(overlay, /function rememberSnapGroup\(group\)/);
+  assert.match(overlay, /function raiseSnapGroup\(address\)/);
+  assert.match(overlay, /root\.raiseSnapGroup\(selected\.address\)/);
+  assert.match(overlay, /window\.alter_zorder\(\{ top = true/);
+  assert.match(overlay, /addresses\.length > 1/);
+});
+
 test("the overlay cycles backward and activates when Alt is released", () => {
   assert.match(overlay, /name: "previous"[\s\S]*root\.invokeShortcut\(-1\)/);
   assert.match(overlay, /hl\.is_key_down\("Alt_L"\)[\s\S]*hl\.is_key_down\("Alt_R"\)/);

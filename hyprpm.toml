@@ -1,0 +1,11 @@
+[repository]
+name = "orbit"
+authors = ["Rohan Patnaik"]
+
+[orbit-drag]
+description = "Native top-edge window drag bridge for Orbit Snap Layouts"
+authors = ["Rohan Patnaik"]
+output = "native/orbit-drag.so"
+build = [
+  "make -C native clean all",
+]

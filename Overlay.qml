@@ -67,6 +67,8 @@ Item {
   property bool snapMonitorReady: false
   property bool snapClientsReady: false
   property var snapRestoreStates: ({})
+  property var snapGroups: []
+  property var pendingSnapGroup: null
   property var snapAnimationAddresses: []
   property string snapPendingFocusAddress: ""
 
@@ -133,13 +135,30 @@ Item {
     }
   }
 
-  function focusedScreen() {
+  function screenForMonitorName(monitorName) {
     const screens = Quickshell.screens || []
     for (const screen of screens) {
-      if (String(screen.name || "") === root.snapshotMonitorName)
+      if (String(screen.name || "") === String(monitorName || ""))
         return screen
     }
+    return null
+  }
+
+  function focusedScreen() {
+    const screens = Quickshell.screens || []
+    const focused = root.screenForMonitorName(root.snapshotMonitorName)
+    if (focused)
+      return focused
     return screens.length > 0 ? screens[0] : null
+  }
+
+  function switcherScreen() {
+    const config = root.shell ? root.shell.shellConfig : null
+    const monitors = []
+    for (const monitor of Hyprland.monitors.values || [])
+      monitors.push(monitor)
+    const monitorName = Logic.overlayMonitorName(config ? config.plugins : null, root.pluginId, monitors, root.snapshotMonitorName)
+    return root.screenForMonitorName(monitorName) || root.focusedScreen()
   }
 
   function captureFocusContext() {
@@ -273,6 +292,7 @@ Item {
     root.windowScope = root.configuredScope()
     if (!root.captureFocusContext())
       return
+    root.targetScreen = root.switcherScreen()
     root.snapshotPending = true
     root.snapshotCancelled = false
     root.pendingActivateOnRelease = activateOnRelease
@@ -400,6 +420,7 @@ Item {
     root.snapClientRows = []
     root.snapAssistCandidates = []
     root.snapRemainingSlots = []
+    root.pendingSnapGroup = null
   }
 
   function openSnapManager() {
@@ -545,6 +566,12 @@ Item {
         remaining.push(index)
     }
     root.snapRemainingSlots = remaining
+    root.pendingSnapGroup = {
+      layoutId: String(layout.id || "layout"),
+      workspaceId: root.snapTargetWindow.workspaceId,
+      monitorId: root.snapTargetWindow.monitorId,
+      addresses: [root.snapTargetWindow.address]
+    }
     root.snapAssistCandidates = root.snapClientRows.filter(window => window.address !== root.snapTargetWindow.address && window.workspaceId === root.snapTargetWindow.workspaceId)
     root.snapAssistSelected = 0
     if (remaining.length > 0 && root.snapAssistCandidates.length > 0)
@@ -562,6 +589,13 @@ Item {
     const slotIndex = root.snapRemainingSlots[0]
     if (!root.snapWindow(candidate, root.snapSelectedLayout, slotIndex))
       return
+    const pendingGroup = root.pendingSnapGroup ? Object.assign({}, root.pendingSnapGroup) : null
+    if (pendingGroup) {
+      pendingGroup.addresses = pendingGroup.addresses.slice()
+      pendingGroup.addresses.push(candidate.address)
+      root.pendingSnapGroup = pendingGroup
+      root.rememberSnapGroup(pendingGroup)
+    }
     root.snapRemainingSlots = root.snapRemainingSlots.slice(1)
     root.snapAssistCandidates = root.snapAssistCandidates.filter(window => window.address !== candidate.address)
     root.snapAssistSelected = Math.min(root.snapAssistSelected, Math.max(0, root.snapAssistCandidates.length - 1))
@@ -580,6 +614,39 @@ Item {
     root.snapSelectedLayout = Logic.wrapIndex(root.snapSelectedLayout + step, root.snapLayouts.length)
     const layout = root.snapLayouts[root.snapSelectedLayout]
     root.snapSelectedSlot = Math.min(root.snapSelectedSlot, layout.slots.length - 1)
+  }
+
+  function rememberSnapGroup(group) {
+    if (!group || !Array.isArray(group.addresses) || group.addresses.length < 2)
+      return
+    const addresses = group.addresses.filter(address => Logic.safeAddress(address) !== "")
+    if (addresses.length < 2)
+      return
+    const next = root.snapGroups.filter(existing => !existing.addresses.some(address => addresses.includes(address)))
+    next.push({
+      layoutId: group.layoutId,
+      workspaceId: group.workspaceId,
+      monitorId: group.monitorId,
+      addresses: addresses
+    })
+    root.snapGroups = next
+  }
+
+  function raiseSnapGroup(address) {
+    const safeAddress = Logic.safeAddress(address)
+    if (!safeAddress)
+      return
+    for (const group of root.snapGroups) {
+      if (!group.addresses.includes(safeAddress))
+        continue
+      for (const memberAddress of group.addresses) {
+        if (memberAddress === safeAddress)
+          continue
+        Hyprland.dispatch('hl.dsp.window.alter_zorder({ top = true, window = "address:' + memberAddress + '" })')
+      }
+      Hyprland.dispatch('hl.dsp.window.alter_zorder({ top = true, window = "address:' + safeAddress + '" })')
+      return
+    }
   }
 
   function cycle(step) {
@@ -732,6 +799,7 @@ Item {
     const selected = root.pendingWindow
     if (!selected)
       return
+    root.raiseSnapGroup(selected.address)
     if (selected.groupIndex > 0) {
       Hyprland.dispatch('hl.dsp.group.active({ window = "address:' + selected.address + '", index = ' + selected.groupIndex + ' })')
     }
@@ -899,6 +967,15 @@ Item {
       if (address)
         liveAddresses[address] = true
     }
+    const nextGroups = []
+    for (const group of root.snapGroups) {
+      const addresses = group.addresses.filter(address => liveAddresses[address] === true)
+      if (addresses.length > 1)
+        nextGroups.push(Object.assign({}, group, {
+          addresses: addresses
+        }))
+    }
+    root.snapGroups = nextGroups
     const remaining = root.windows.filter(window => liveAddresses[window.address] === true)
     if (remaining.length === root.windows.length)
       return

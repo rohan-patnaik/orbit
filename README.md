@@ -20,6 +20,12 @@ Orbit also adds a Windows-inspired desktop layout layer:
 - **Window modes** — `Super+Shift+Z` chooses the default launch mode and can
   disable Omarchy's tiled, floating, full-width, fullscreen, or tiled-fullscreen
   shortcuts. At least one normal window mode always remains enabled.
+- **Top-edge drag** — the optional ABI-matched native bridge recognizes a real
+  compositor move-drag from an application's titlebar (or `Super`+drag). Drop
+  the window at the top edge and Orbit opens the same Snap Layout chooser.
+- **Snap Groups** — windows placed together through Snap Assist are remembered
+  for the current shell session. Alt+Tab raises the whole group before focusing
+  the selected member, matching Windows' grouped restore behavior.
 
 Grid and Flip use bounded, one-frame Quickshell window captures. Grid sizes each
 card to the source window's aspect ratio, so the full capture fills the preview
@@ -32,8 +38,9 @@ Each switch session is built from one fresh Hyprland client query ordered by
 `focusHistoryID`. The active window is first, the last-used window is second, and
 releasing Alt activates the current selection, matching Windows-style MRU cycling.
 By default, Orbit combines the active workspace from every connected monitor into one
-MRU list, while keeping the overlay on the monitor where Alt+Tab was invoked. Selecting
-a window focuses it in place without moving it between monitors. Fullscreen handoffs
+MRU list, while always rendering the Alt+Tab overlay on the primary display at the
+compositor origin. Selecting a window focuses it in place without moving it between
+monitors. Fullscreen handoffs
 are isolated per workspace, so a fullscreen window on one display is never resized or
 released merely because focus moved to another display.
 Orbit also preserves fullscreen and maximized state per window. Before focus moves,
@@ -92,6 +99,22 @@ hyprctl reload
 hyprctl configerrors
 ```
 
+For native titlebar/top-edge drag integration, build the small Hyprland bridge
+against the compositor currently installed on the machine, then load it:
+
+```bash
+bash ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/build-native.sh
+hyprctl plugin load ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/native/orbit-drag.so
+hyprctl plugin list
+```
+
+Hyprland plugins run inside the compositor and have no stable ABI. Orbit checks
+the Hyprland build hash at load time and refuses a mismatch; the build helper
+also reports the compositor's full ABI string. Rebuild this bridge after each
+Hyprland upgrade. Omarchy's marketplace installer intentionally never executes
+install hooks, so marketplace updates do not compile it automatically; Super+Z,
+Snap Assist, Snap Groups, and all Alt+Tab behavior work without the bridge.
+
 Orbit replaces Omarchy's stock `Alt+Tab` bindings. The stock direct window
 cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
 
@@ -104,6 +127,8 @@ cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
 - Use `Super+Q` or `Super+Shift+Q` for Omarchy's original direct window cycle.
 - Press `Super+Z` to choose a snap layout for the active window. Click a zone or
   choose it with the arrow keys and Enter; Snap Assist then fills the open zones.
+- With the optional native bridge loaded, drag a window by its own titlebar to
+  the top edge and release it to open that same chooser on its current monitor.
 - Press `Super+Shift+Z` to choose the default launch mode and enabled window-mode
   shortcuts. Changes take effect on the next window after Hyprland reloads.
 - Press `1`, `2`, or `3` to select Icons, Flip, or Grid. The choice is saved in
@@ -133,6 +158,12 @@ next Hyprland reload. Orbit retains the internal plugin ID
 `io.github.rohan-patnaik.window-switcher` so existing installations and saved
 mode preferences continue to work after the public rename.
 
+If the native bridge is loaded, unload it before removing Orbit:
+
+```bash
+hyprctl plugin unload ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/native/orbit-drag.so
+```
+
 ### Window scope
 
 The default `visible` scope matches a Windows-style extended desktop: Orbit includes
@@ -146,6 +177,7 @@ workspaces remain excluded from `all`.
   "id": "io.github.rohan-patnaik.window-switcher",
   "mode": "grid",
   "scope": "visible",
+  "overlayMonitor": "primary",
   "windowModes": {
     "defaultMode": "maximized",
     "tiled": true,
@@ -156,6 +188,12 @@ workspaces remain excluded from `all`.
   }
 }
 ```
+
+`overlayMonitor` defaults to `primary`, the monitor positioned at `0x0` in the
+Hyprland layout. Set it to an exact output name such as `HDMI-A-1` to pin the
+switcher there explicitly, or to `focused` to restore the previous behavior.
+This controls only where the Alt+Tab UI appears; app eligibility still follows
+`scope`, and Snap Layouts continue to open on the window being arranged.
 
 The window-mode policy controls Orbit's default launch rule and the standard
 Omarchy shortcuts. It intentionally does not reject application-requested
