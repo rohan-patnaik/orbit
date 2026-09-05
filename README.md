@@ -286,9 +286,10 @@ journalctl --user -u omarchy-shell.service -n 100 --no-pager
 The root `preview.png` is the original monochrome marketplace mark for this
 plugin listing.
 
-The [0.6.0 validation report](docs/AUDIT-2026-09-05.md) distinguishes automated
-regressions, live compositor tests, and remaining release checks. This candidate
-has not been submitted to the marketplace.
+The [0.6.1 release notes](docs/RELEASE-0.6.1.md) describe the patch and upgrade steps.
+The [performance validation](docs/PERFORMANCE-2026-09-05.md) records the measured
+latency, resource use, live regression checks, and remaining limits. Marketplace
+promotion is tracked separately in the [exact-commit update request](https://github.com/omacom/omarchy-plugin-marketplace/issues/4612).
 
 ## License
 

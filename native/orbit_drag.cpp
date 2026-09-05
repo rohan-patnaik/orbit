@@ -245,7 +245,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         cleanup();
         throw;
     }
-    return {"orbit-drag", "Live snap gestures and committed Wayland surface readiness.", "Rohan Patnaik", "0.6.0"};
+    return {"orbit-drag", "Live snap gestures and committed Wayland surface readiness.", "Rohan Patnaik", "0.6.1"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() { cleanup(); }

@@ -1,5 +1,9 @@
 # Orbit 0.6.0 — acceptance checkpoint
 
+This is a historical checkpoint. Subsequent foreground validation is recorded in
+the [performance report](PERFORMANCE-2026-09-05.md); the accepted patch and marketplace
+update are described in the [0.6.1 release notes](RELEASE-0.6.1.md).
+
 Date: 2026-09-05. Status: **user accepted the candidate and authorized commit/push**.
 
 The user confirmed that the changes work. This authorizes the GitHub commit and
