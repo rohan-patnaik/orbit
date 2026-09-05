@@ -15,6 +15,9 @@ Item {
   property var shell: null
   property var manifest: null
   property bool opened: false
+  property bool pickerPresented: false
+  property bool coverCaptureNeeded: false
+  readonly property bool modifierPollingNeeded: root.opened && root.releaseToActivate && root.switcherInputSource !== "native"
   property bool releaseToActivate: false
   property string releaseModifier: ""
   property bool hoverArmed: false
@@ -291,6 +294,9 @@ Item {
       return []
 
     const rows = []
+    // Resolve each app once per fresh snapshot. No long-lived icon cache that
+    // could outlive desktop-entry or theme changes.
+    const applicationsByClass = ({})
     const toplevels = Hyprland.toplevels.values || []
     const toplevelByAddress = ({})
     for (const toplevel of toplevels) {
@@ -317,7 +323,9 @@ Item {
       const initialClass = String(ipc.initialClass || "")
       const applicationClass = String(ipc.class || initialClass || appId || "Application")
       const title = String(ipc.title || (toplevel ? toplevel.title || "" : "") || applicationClass)
-      const application = root.applicationInfo(applicationClass, initialClass, appId)
+      const applicationKey = JSON.stringify([applicationClass, initialClass, appId])
+      const application = applicationsByClass[applicationKey] || root.applicationInfo(applicationClass, initialClass, appId)
+      applicationsByClass[applicationKey] = application
       const size = Array.isArray(ipc.size) ? ipc.size : []
       rows.push({
         address: address,
@@ -375,10 +383,23 @@ Item {
     root.releaseModifier = root.pendingActivateOnRelease ? root.pendingModifier : ""
     root.hoverArmed = false
     root.initialPointerPosition = Qt.point(-1, -1)
+    // A gesture released while the query was in flight needs no picker or
+    // thumbnail delegates. Only a possible resize needs the passive capture.
+    root.pickerPresented = !root.pendingGestureReleased && root.switcherInputSource !== "native"
+    const source = nextWindows[0]
+    const coverCandidates = root.pendingGestureReleased ? [nextEntries[root.selectedIndex]] : nextWindows
+    root.coverCaptureNeeded = coverCandidates.some(target => Logic.needsHandoffCover(source, target, root.rememberedFullscreenStates[target.address], root.windowModes))
     root.opened = true
     watchdog.restart()
     if (root.pendingGestureReleased)
       root.accept()
+    else if (!root.pickerPresented)
+      pickerPresentationTimer.restart()
+  }
+
+  function presentPicker() {
+    if (root.opened && !root.activationCommitInProgress && root.releaseToActivate)
+      root.pickerPresented = true
   }
 
   function startSwitcher(activateOnRelease, modifier, direction, inputSource) {
@@ -396,6 +417,8 @@ Item {
     root.pendingDirection = direction
     root.queuedSteps = 0
     root.pendingGestureReleased = false
+    root.pickerPresented = false
+    root.coverCaptureNeeded = false
     root.switcherInputSource = inputSource || "global"
     // A cancelled Process can still be delivering its old stdout. Drain that
     // generation before starting another query, never reuse its old snapshot.
@@ -857,6 +880,11 @@ Item {
       root.deferredSwitchGestures = root.deferredSwitchGestures.map(gesture => Object.assign({}, gesture, {
           source: "global"
         }))
+      if (root.opened) {
+        pickerPresentationTimer.stop()
+        root.presentPicker()
+        watchdog.restart()
+      }
     } catch (error) {}
   }
 
@@ -889,7 +917,7 @@ Item {
   function observeSwitcherCancel(text) {
     root.traceInput("native-cancel", "")
     try {
-      if (JSON.parse(text).protocol === 1 && (root.opened || root.snapshotPending))
+      if (JSON.parse(text).protocol === 1 && (root.opened || root.snapshotPending || root.deferredSwitchGestures.length > 0))
         root.cancel()
     } catch (error) {}
   }
@@ -1043,6 +1071,16 @@ Item {
     activationDispatch.running = true
   }
 
+  function requestActivationReadiness() {
+    if (!root.activationCommitInProgress || root.activationCommitFinalizing || root.activationCommitAttempts === 0 || !root.pendingWindow || activationDispatch.running || activationReadinessQuery.running)
+      return
+    if ((root.activationTargetSurfaceReady && root.activationFocusConfirmed) || (root.activationCommitSettling && root.activationReadiness.startsWith("fallback-")))
+      return
+    activationReadinessQuery.generation = root.activationGeneration
+    activationReadinessQuery.command = ["hyprctl", "orbit-window-ready", root.pendingWindow.address]
+    activationReadinessQuery.running = true
+  }
+
   function raisePendingWindow() {
     const selected = root.pendingWindow
     if (!selected)
@@ -1058,15 +1096,18 @@ Item {
     Hyprland.dispatch('hl.dsp.window.bring_to_top()')
   }
 
-  function abortActivationCommit() {
+  function abortActivationCommit(targetClosed) {
     root.traceInput("abort", "")
     activationDispatch.running = false
+    activationReadinessQuery.running = false
     activationCommitTimer.stop()
     activationSettleTimer.stop()
     activationRevealTimer.stop()
     activationFinalizeTimer.stop()
+    pickerPresentationTimer.stop()
     root.releaseHandoffAnimations()
-    console.warn("window-switcher: selected window did not accept focus; keeping Orbit open")
+    if (!targetClosed)
+      console.warn("window-switcher: selected window did not accept focus; keeping Orbit open")
     root.pendingWindow = null
     root.pendingFullscreenRelease = null
     root.pendingFullscreenRestore = null
@@ -1080,6 +1121,19 @@ Item {
     root.deferredSwitchGestures = []
     root.releaseToActivate = false
     root.releaseModifier = ""
+    if (targetClosed) {
+      root.opened = false
+      root.pickerPresented = false
+      watchdog.stop()
+      // The target can close after the atomic handoff released the source's
+      // fullscreen geometry. Restore that surviving source's original mode.
+      const source = root.windows.find(window => window.address === root.lastHandoff.source)
+      const mode = Logic.fullscreenState(root.lastHandoff.sourceInternal)
+      if (source && mode > 0)
+        Hyprland.dispatch('hl.dsp.window.fullscreen_state({internal=' + mode + ',client=-1,action="set",window="address:' + source.address + '"})')
+      return
+    }
+    root.pickerPresented = true
     watchdog.restart()
   }
 
@@ -1120,8 +1174,8 @@ Item {
     }
   }
 
-  function advanceActivationCommit() {
-    if (!root.activationCommitInProgress)
+  function advanceActivationCommit(fromReadiness) {
+    if (!root.activationCommitInProgress || root.activationCommitFinalizing)
       return
     const selected = root.pendingWindow
     if (!selected) {
@@ -1130,6 +1184,11 @@ Item {
     }
 
     root.activationCommitAttempts++
+    if (activationDispatch.running || (!fromReadiness && activationReadinessQuery.running)) {
+      if (root.activationCommitAttempts >= root.activationCommitAttemptLimit)
+        root.abortActivationCommit()
+      return
+    }
     if (root.activationCommitAttempts === 1) {
       root.requestPendingActivation()
       return
@@ -1159,7 +1218,7 @@ Item {
   }
 
   function observeActivationTargetCommit(text, generation) {
-    if (!root.activationCommitInProgress || !root.pendingWindow)
+    if (!root.activationCommitInProgress || root.activationCommitFinalizing || !root.pendingWindow)
       return
     if (generation !== root.activationGeneration)
       return
@@ -1178,8 +1237,11 @@ Item {
       root.activationNativeFocusAvailable = true
       root.activationFocusConfirmed = state.active
     }
-    if (!root.handoffNeedsCover || root.activationTargetSurfaceReady)
+    if (!root.handoffNeedsCover || root.activationTargetSurfaceReady) {
+      if (root.activationFocusConfirmed && root.activationCommitAttempts > 0)
+        root.advanceActivationCommit(true)
       return
+    }
     if (!state.supported) {
       root.activationReadiness = "fallback-unsupported"
       return
@@ -1192,7 +1254,8 @@ Item {
     if (root.activationCommitSettling) {
       activationSettleTimer.stop()
       activationRevealTimer.restart()
-    }
+    } else if (root.activationFocusConfirmed && root.activationCommitAttempts > 0)
+      root.advanceActivationCommit(true)
   }
 
   function finish(activate) {
@@ -1200,6 +1263,7 @@ Item {
     if (!root.opened || root.activationCommitInProgress)
       return
     const selected = activate && root.selectedIndex >= 0 ? root.entries[root.selectedIndex] : null
+    pickerPresentationTimer.stop()
     watchdog.stop()
     root.releaseToActivate = false
     root.releaseModifier = ""
@@ -1300,6 +1364,10 @@ Item {
     if (remaining.length === root.windows.length)
       return
     root.windows = Logic.decorateDuplicateLabels(remaining)
+    if (root.activationCommitInProgress && root.pendingWindow && !liveAddresses[root.pendingWindow.address]) {
+      root.abortActivationCommit(true)
+      return
+    }
     const remainingEntries = root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
     if (remainingEntries.length < 2) {
       root.cancel()
@@ -1364,6 +1432,7 @@ Item {
 
   Process {
     id: activationDispatch
+    onExited: root.requestActivationReadiness()
     stdout: StdioCollector {
       onStreamFinished: root.traceInput("activation-result", text.trim())
     }
@@ -1450,6 +1519,11 @@ Item {
         readiness: root.activationReadiness,
         nativeFocus: root.activationNativeFocusAvailable,
         focusConfirmed: root.activationFocusConfirmed,
+        resources: {
+          pickerRequested: root.opened && root.pickerPresented,
+          coverCaptureRequested: root.opened && root.coverCaptureNeeded,
+          modifierPolling: root.modifierPollingNeeded
+        },
         input: {
           pending: root.snapshotPending,
           released: root.pendingGestureReleased,
@@ -1506,12 +1580,19 @@ Item {
   Timer {
     id: watchdog
     interval: 10000
-    onTriggered: root.cancel()
+    // The bridge delivers Alt-up/Escape in order. Holding Alt needs neither
+    // periodic subprocesses nor an expiry. Unload explicitly enables fallback.
+    onTriggered: {
+      if (root.switcherInputSource !== "native" || !root.releaseToActivate)
+        root.cancel()
+    }
   }
 
   Timer {
     id: activationCommitTimer
-    interval: 40
+    // Ordinary switches need one frame for the grab to unmap. Resize covers
+    // retain their capture head start and the existing bounded retry cadence.
+    interval: root.activationCommitAttempts === 0 && !root.handoffNeedsCover ? 16 : 40
     repeat: true
     onTriggered: root.advanceActivationCommit()
   }
@@ -1536,14 +1617,16 @@ Item {
   Timer {
     interval: 32
     repeat: true
-    running: root.activationCommitInProgress && !root.activationCommitFinalizing
-    onTriggered: {
-      if (activationReadinessQuery.running || !root.pendingWindow)
-        return
-      activationReadinessQuery.generation = root.activationGeneration
-      activationReadinessQuery.command = ["hyprctl", "orbit-window-ready", root.pendingWindow.address]
-      activationReadinessQuery.running = true
-    }
+    running: root.activationCommitInProgress && !root.activationCommitFinalizing && !(root.activationTargetSurfaceReady && root.activationFocusConfirmed) && !(root.activationCommitSettling && root.activationReadiness.startsWith("fallback-"))
+    onTriggered: root.requestActivationReadiness()
+  }
+
+  Timer {
+    id: pickerPresentationTimer
+    // Native Tab/Alt-up events work before the grab surface exists. A quick
+    // tap can therefore activate immediately without flashing a costly picker.
+    interval: 75
+    onTriggered: root.presentPicker()
   }
 
   Timer {
@@ -1770,267 +1853,279 @@ Item {
     active: root.opened
 
     Scope {
-      readonly property var loadedView: panel.loadedView
+      readonly property var loadedView: pickerLayer.item ? pickerLayer.item.loadedView : null
 
-      PanelWindow {
-        id: panel
-        readonly property var loadedView: viewLoader.item
+      LazyLoader {
+        id: pickerLayer
+        active: root.pickerPresented
 
-        // Unmap the actual grab surface at commit. Changing keyboardFocus to
-        // None before its initial map can leave a stale exclusive grab in the
-        // compositor. Keep the passive cover in a separate sibling window.
-        visible: !root.activationCommitInProgress
-        screen: root.targetScreen
-        anchors {
-          top: true
-          bottom: true
-          left: true
-          right: true
-        }
-        color: "transparent"
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.namespace: "omarchy-window-switcher"
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+        PanelWindow {
+          id: panel
+          readonly property var loadedView: viewLoader.item
 
-        Timer {
-          id: modifierPollTimer
-          interval: 150
-          repeat: true
-          // Keep the fallback alive after repeated keys too: layer focus changes
-          // can lose the final modifier-release event on multi-monitor setups.
-          running: root.opened && root.releaseToActivate
-          onTriggered: {
-            if (!modifierCheck.running)
-              modifierCheck.running = true
+          // Unmap the actual grab surface at commit. Changing keyboardFocus to
+          // None before its initial map can leave a stale exclusive grab in the
+          // compositor. Keep the passive cover in a separate sibling window.
+          visible: !root.activationCommitInProgress
+          screen: root.targetScreen
+          anchors {
+            top: true
+            bottom: true
+            left: true
+            right: true
           }
-        }
+          color: "transparent"
+          exclusionMode: ExclusionMode.Ignore
+          WlrLayershell.namespace: "omarchy-window-switcher"
+          WlrLayershell.layer: WlrLayer.Overlay
+          WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
-        Process {
-          id: modifierCheck
-          command: ["hyprctl", "eval", root.releaseModifierExpression()]
-          stdout: StdioCollector {
-            onStreamFinished: root.observeModifierState(text)
-          }
-        }
-
-        Rectangle {
-          id: switcherScrim
-
-          anchors.fill: parent
-          color: Color.menu.scrim
-
-          TapHandler {
-            onTapped: root.cancel()
-          }
-        }
-
-        MouseArea {
-          anchors.fill: parent
-          acceptedButtons: Qt.NoButton
-          hoverEnabled: true
-          onPositionChanged: mouse => root.pointerMoved(mouse.x, mouse.y)
-        }
-
-        Rectangle {
-          id: switcherCard
-
-          anchors.centerIn: parent
-          width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
-          height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
-          radius: Style.cornerRadius * 2
-          color: Color.menu.background
-          border.width: 1
-          border.color: Color.menu.border
-          focus: true
-
-          Keys.onPressed: event => {
-            root.traceInput("qml-switcher-key", event.key)
-            if (event.key === Qt.Key_Escape) {
-              if (root.switcherInputSource !== "native")
-                root.cancel()
-            } else if (event.key === Qt.Key_Q) {
-              root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
-            } else if (event.key === Qt.Key_Tab) {
-              root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
-            } else if (event.key === Qt.Key_Backtab) {
-              root.cycle(-1)
-            } else if (event.key === Qt.Key_Right) {
-              root.navigate("right")
-            } else if (event.key === Qt.Key_Left) {
-              root.navigate("left")
-            } else if (event.key === Qt.Key_Down) {
-              root.navigate("down")
-            } else if (event.key === Qt.Key_Up) {
-              root.navigate("up")
-            } else if (event.key === Qt.Key_1) {
-              root.setMode("icons")
-            } else if (event.key === Qt.Key_2) {
-              root.setMode("flip")
-            } else if (event.key === Qt.Key_3) {
-              root.setMode("grid")
-            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-              root.accept()
-            } else {
-              return
+          Timer {
+            id: modifierPollTimer
+            interval: 150
+            repeat: true
+            // Keep the fallback alive after repeated keys too: layer focus changes
+            // can lose the final modifier-release event on multi-monitor setups.
+            running: root.modifierPollingNeeded
+            onTriggered: {
+              if (!modifierCheck.running)
+                modifierCheck.running = true
             }
-            event.accepted = true
           }
 
-          Keys.onReleased: event => {
-            root.traceInput("qml-release", event.key)
-            const superReleased = event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R
-            const altReleased = event.key === Qt.Key_Alt
-            const modifierReleased = root.releaseModifier === "alt" ? altReleased : root.releaseModifier === "super" && superReleased
-            if (root.releaseToActivate && modifierReleased && root.switcherInputSource !== "native")
-              root.accept()
-            event.accepted = true
+          Process {
+            id: modifierCheck
+            command: ["hyprctl", "eval", root.releaseModifierExpression()]
+            stdout: StdioCollector {
+              onStreamFinished: root.observeModifierState(text)
+            }
           }
 
-          Text {
-            id: heading
-            anchors.top: parent.top
-            anchors.topMargin: Style.space(18)
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
-            color: Color.menu.text
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
+          Rectangle {
+            id: switcherScrim
+
+            anchors.fill: parent
+            color: Color.menu.scrim
+
+            TapHandler {
+              onTapped: root.cancel()
+            }
           }
 
-          Loader {
-            id: viewLoader
+          MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            hoverEnabled: true
+            onPositionChanged: mouse => root.pointerMoved(mouse.x, mouse.y)
+          }
+
+          Rectangle {
+            id: switcherCard
 
             anchors.centerIn: parent
-            width: item ? item.implicitWidth : 0
-            height: item ? item.implicitHeight : 0
-            sourceComponent: root.mode === "grid" ? gridViewComponent : root.mode === "flip" ? flipViewComponent : iconsViewComponent
-          }
+            width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
+            height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
+            radius: Style.cornerRadius * 2
+            color: Color.menu.background
+            border.width: 1
+            border.color: Color.menu.border
+            focus: true
 
-          Component {
-            id: iconsViewComponent
-
-            IconsView {
-              maximumWidth: panel.width - Style.space(96)
-              windows: root.entries
-              selectedIndex: root.selectedIndex
-              hoverArmed: root.hoverArmed
-              onSelectRequested: index => root.select(index)
-              onActivateRequested: index => {
-                root.select(index)
+            Keys.onPressed: event => {
+              root.traceInput("qml-switcher-key", event.key)
+              if (event.key === Qt.Key_Escape) {
+                if (root.switcherInputSource !== "native")
+                  root.cancel()
+              } else if (event.key === Qt.Key_Q) {
+                root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
+              } else if (event.key === Qt.Key_Tab) {
+                root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
+              } else if (event.key === Qt.Key_Backtab) {
+                root.cycle(-1)
+              } else if (event.key === Qt.Key_Right) {
+                root.navigate("right")
+              } else if (event.key === Qt.Key_Left) {
+                root.navigate("left")
+              } else if (event.key === Qt.Key_Down) {
+                root.navigate("down")
+              } else if (event.key === Qt.Key_Up) {
+                root.navigate("up")
+              } else if (event.key === Qt.Key_1) {
+                root.setMode("icons")
+              } else if (event.key === Qt.Key_2) {
+                root.setMode("flip")
+              } else if (event.key === Qt.Key_3) {
+                root.setMode("grid")
+              } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
                 root.accept()
+              } else {
+                return
+              }
+              event.accepted = true
+            }
+
+            Keys.onReleased: event => {
+              root.traceInput("qml-release", event.key)
+              const superReleased = event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R
+              const altReleased = event.key === Qt.Key_Alt
+              const modifierReleased = root.releaseModifier === "alt" ? altReleased : root.releaseModifier === "super" && superReleased
+              if (root.releaseToActivate && modifierReleased && root.switcherInputSource !== "native")
+                root.accept()
+              event.accepted = true
+            }
+
+            Text {
+              id: heading
+              anchors.top: parent.top
+              anchors.topMargin: Style.space(18)
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
+              color: Color.menu.text
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Loader {
+              id: viewLoader
+
+              anchors.centerIn: parent
+              width: item ? item.implicitWidth : 0
+              height: item ? item.implicitHeight : 0
+              sourceComponent: root.mode === "grid" ? gridViewComponent : root.mode === "flip" ? flipViewComponent : iconsViewComponent
+            }
+
+            Component {
+              id: iconsViewComponent
+
+              IconsView {
+                maximumWidth: panel.width - Style.space(96)
+                windows: root.entries
+                selectedIndex: root.selectedIndex
+                hoverArmed: root.hoverArmed
+                onSelectRequested: index => root.select(index)
+                onActivateRequested: index => {
+                  root.select(index)
+                  root.accept()
+                }
               }
             }
-          }
 
-          Component {
-            id: gridViewComponent
+            Component {
+              id: gridViewComponent
 
-            GridView {
-              maximumWidth: panel.width - Style.space(96)
-              maximumHeight: panel.height - Style.space(190)
-              windows: root.entries
-              selectedIndex: root.selectedIndex
-              hoverArmed: root.hoverArmed
-              onSelectRequested: index => root.select(index)
-              onActivateRequested: index => {
-                root.select(index)
-                root.accept()
+              GridView {
+                maximumWidth: panel.width - Style.space(96)
+                maximumHeight: panel.height - Style.space(190)
+                windows: root.entries
+                selectedIndex: root.selectedIndex
+                hoverArmed: root.hoverArmed
+                onSelectRequested: index => root.select(index)
+                onActivateRequested: index => {
+                  root.select(index)
+                  root.accept()
+                }
               }
             }
-          }
 
-          Component {
-            id: flipViewComponent
+            Component {
+              id: flipViewComponent
 
-            FlipView {
-              maximumWidth: panel.width - Style.space(96)
-              maximumHeight: panel.height - Style.space(190)
-              windows: root.entries
-              selectedIndex: root.selectedIndex
-              hoverArmed: root.hoverArmed
-              onSelectRequested: index => root.select(index)
-              onActivateRequested: index => {
-                root.select(index)
-                root.accept()
+              FlipView {
+                maximumWidth: panel.width - Style.space(96)
+                maximumHeight: panel.height - Style.space(190)
+                windows: root.entries
+                selectedIndex: root.selectedIndex
+                hoverArmed: root.hoverArmed
+                onSelectRequested: index => root.select(index)
+                onActivateRequested: index => {
+                  root.select(index)
+                  root.accept()
+                }
               }
             }
-          }
 
-          ModePicker {
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(39)
-            anchors.horizontalCenter: parent.horizontalCenter
-            currentMode: root.mode
-            onModeRequested: mode => root.setMode(mode)
-          }
+            ModePicker {
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.space(39)
+              anchors.horizontalCenter: parent.horizontalCenter
+              currentMode: root.mode
+              onModeRequested: mode => root.setMode(mode)
+            }
 
-          Text {
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: Style.space(16)
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(parent.width - Style.space(48), Style.space(620))
-            text: root.entries.length > 0 ? root.entries[root.selectedIndex].title : ""
-            textFormat: Text.PlainText
-            color: Color.menu.text
-            opacity: 0.72
-            elide: Text.ElideRight
-            horizontalAlignment: Text.AlignHCenter
-            font.family: Style.font.menuFamily
-            font.pixelSize: Style.font.caption
+            Text {
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.space(16)
+              anchors.horizontalCenter: parent.horizontalCenter
+              width: Math.min(parent.width - Style.space(48), Style.space(620))
+              text: root.entries[root.selectedIndex] ? root.entries[root.selectedIndex].title : ""
+              textFormat: Text.PlainText
+              color: Color.menu.text
+              opacity: 0.72
+              elide: Text.ElideRight
+              horizontalAlignment: Text.AlignHCenter
+              font.family: Style.font.menuFamily
+              font.pixelSize: Style.font.caption
+            }
           }
         }
       }
 
-      PanelWindow {
-        // The picker stays on the primary display, but a resize cover belongs
-        // to the outgoing window's display. This window never takes input.
-        screen: root.screenForMonitorName(root.windows.length > 0 ? root.windows[0].monitorName : "") || root.targetScreen
-        anchors {
-          top: true
-          bottom: true
-          left: true
-          right: true
-        }
-        exclusionMode: ExclusionMode.Ignore
-        color: "transparent"
-        mask: Region {}
-        WlrLayershell.namespace: "omarchy-orbit-handoff"
-        WlrLayershell.layer: WlrLayer.Overlay
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+      LazyLoader {
+        active: root.coverCaptureNeeded
 
-        Rectangle {
-          id: handoffCover
-
-          anchors.fill: parent
-          z: 1000
-          opacity: root.activationCommitInProgress && root.handoffNeedsCover ? 1 : 0
-          color: Color.menu.background
-          clip: true
-
-          ScreencopyView {
-            id: outgoingCapture
-
-            readonly property var captureWindow: root.windows.length > 0 ? root.windows[0] : null
-            readonly property real coverScale: sourceSize.width > 0 && sourceSize.height > 0 ? Math.max(handoffCover.width / sourceSize.width, handoffCover.height / sourceSize.height) : 1
-
-            anchors.centerIn: parent
-            width: sourceSize.width > 0 ? sourceSize.width * coverScale : handoffCover.width
-            height: sourceSize.height > 0 ? sourceSize.height * coverScale : handoffCover.height
-            captureSource: captureWindow ? captureWindow.wayland : null
-            constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
-            paintCursor: false
-            live: false
+        PanelWindow {
+          // The picker stays on the primary display, but a resize cover belongs
+          // to the outgoing window's display. This window never takes input.
+          screen: root.screenForMonitorName(root.windows.length > 0 ? root.windows[0].monitorName : "") || root.targetScreen
+          anchors {
+            top: true
+            bottom: true
+            left: true
+            right: true
           }
+          exclusionMode: ExclusionMode.Ignore
+          color: "transparent"
+          mask: Region {}
+          WlrLayershell.namespace: "omarchy-orbit-handoff"
+          WlrLayershell.layer: WlrLayer.Overlay
+          WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-          ShaderEffectSource {
-            anchors.centerIn: parent
-            width: outgoingCapture.width
-            height: outgoingCapture.height
-            sourceItem: outgoingCapture
-            hideSource: true
-            live: !root.activationCommitInProgress
+          Rectangle {
+            id: handoffCover
+
+            anchors.fill: parent
+            z: 1000
+            opacity: root.activationCommitInProgress && root.handoffNeedsCover && outgoingCapture.hasContent ? 1 : 0
+            color: Color.menu.background
+            clip: true
+
+            ScreencopyView {
+              id: outgoingCapture
+
+              readonly property var captureWindow: root.windows.length > 0 ? root.windows[0] : null
+              readonly property real coverScale: sourceSize.width > 0 && sourceSize.height > 0 ? Math.max(handoffCover.width / sourceSize.width, handoffCover.height / sourceSize.height) : 1
+
+              anchors.centerIn: parent
+              width: sourceSize.width > 0 ? sourceSize.width * coverScale : handoffCover.width
+              height: sourceSize.height > 0 ? sourceSize.height * coverScale : handoffCover.height
+              captureSource: captureWindow ? captureWindow.wayland : null
+              constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
+              paintCursor: false
+              live: false
+            }
+
+            ShaderEffectSource {
+              anchors.centerIn: parent
+              width: outgoingCapture.width
+              height: outgoingCapture.height
+              sourceItem: outgoingCapture
+              hideSource: true
+              // A fast Alt release can precede the first captured frame. Keep
+              // updating through the capture head start, then freeze before
+              // the first activation transaction can resize the source.
+              live: !root.activationCommitInProgress || root.activationCommitAttempts === 0
+            }
           }
         }
       }

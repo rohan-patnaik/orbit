@@ -2,6 +2,14 @@
 -- window-cycle behavior available on Super+Q.
 local orbit_plugin_id = "io.github.rohan-patnaik.window-switcher"
 
+-- A compositor fade keeps the outgoing cover visible after the destination is
+-- ready. These keyboard surfaces must map/unmap on the frame Orbit requests.
+hl.layer_rule({
+  match = { namespace = "^(omarchy-window-switcher|omarchy-orbit-handoff)$" },
+  no_anim = true,
+  animation = "none",
+})
+
 local function orbit_window_modes()
   local modes = {
     default_mode = "tiled",

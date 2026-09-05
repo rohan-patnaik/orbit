@@ -36,6 +36,11 @@ function fullscreenHandoffPlan(sourceInternalState, targetInternalState, targetD
   }
 }
 
+function needsHandoffCover(source, target, remembered, modes) {
+  if (!source || !target || source.address === target.address || !sameWorkspace(source, target)) return false
+  return fullscreenState(target.fullscreenState) !== desiredWindowState(target, remembered, modes)
+}
+
 function dimensionsDiffer(firstWidth, firstHeight, secondWidth, secondHeight, tolerance) {
   var limit = Math.max(0, Number(tolerance) || 0)
   return Math.abs((Number(firstWidth) || 0) - (Number(secondWidth) || 0)) > limit
@@ -711,4 +716,13 @@ function flipEntries(rows, selectedIndex, maximumVisible) {
     })
   }
   return entries
+}
+
+function flipOffset(index, selectedIndex, length, maximumVisible) {
+  if (length <= 0 || maximumVisible <= 0) return null
+  var count = Math.min(length, maximumVisible)
+  var before = Math.floor((count - 1) / 2)
+  var after = count - before - 1
+  var offset = wrapIndex(index - selectedIndex + before, length) - before
+  return offset <= after ? offset : null
 }

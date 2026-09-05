@@ -14,7 +14,9 @@ function overlay(overrides = {}) {
     activationCommitInProgress: false, managerMode: '', windows: [], mode: 'grid',
     snapshotRestartPending: false, deferredSwitchGestures: [], pendingGestureReleased: false,
     switcherInputSource: 'global', inputTraceEnabled: false, inputTrace: [],
-    activationGeneration: 0,
+    activationGeneration: 0, activationCommitAttempts: 0, activationCommitAttemptLimit: 50,
+    activationReadiness: 'none', lastHandoff: {},
+    pickerPresented: false, coverCaptureNeeded: false,
     selectedIndex: 0, snapQueryPending: false, snapGroups: [], snapRestoreStates: {},
     snapMonitorRows: [], snapClientRows: [], snapAnimationAddresses: [],
     rememberedFullscreenStates: {}, handoffAnimationAddresses: [],
@@ -24,6 +26,7 @@ function overlay(overrides = {}) {
   }, overrides);
   Object.defineProperty(root, 'entries', { get: () => root.mode === 'icons' ? logic.applicationEntries(root.windows) : root.windows });
   Object.defineProperty(root, 'snapLayouts', { get: () => logic.availableSnapLayouts(root.windowModes) });
+  Object.defineProperty(root, 'modifierPollingNeeded', { get: () => root.opened && root.releaseToActivate && root.switcherInputSource !== 'native' });
   const env = vm.createContext({
     root, Logic: logic, console, Style: { gapsOut: 6 },
     Qt: { point: (x, y) => ({ x, y }) },
@@ -34,8 +37,8 @@ function overlay(overrides = {}) {
       { id: 1, name: 'HDMI-A-1', x: 0, y: 0, activeWorkspace: { id: 1 } }
     ] }, focusedWorkspace: { id: 2 }, focusedMonitor: { id: 0, name: 'eDP-1' },
       toplevels: { values: [] }, dispatch: command => calls.push(command) },
-    windowQuery: {}, snapActiveQuery: {}, snapMonitorQuery: {}, snapClientsQuery: {}, settingsReload: {}, mediaExitRestore: {}, activationDispatch: {},
-    watchdog: timer(), dragWatchdog: timer(), snapAnimationRelease: timer(), snapFocusTimer: timer(),
+    windowQuery: {}, snapActiveQuery: {}, snapMonitorQuery: {}, snapClientsQuery: {}, settingsReload: {}, mediaExitRestore: {}, activationDispatch: {}, activationReadinessQuery: {},
+    watchdog: timer(), dragWatchdog: timer(), snapAnimationRelease: timer(), snapFocusTimer: timer(), pickerPresentationTimer: timer(),
     activationCommitTimer: timer(), activationSettleTimer: timer(), activationRevealTimer: timer(), activationFinalizeTimer: timer(),
     dragLayer: { item: null }, switcherLayer: { item: null },
   });

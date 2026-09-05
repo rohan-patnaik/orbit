@@ -202,8 +202,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         });
         motionListener = Event::bus()->m_events.input.mouse.move.listen([](Vector2D, Event::SCallbackInfo&) {
             // This hook precedes Hyprland's own move processing: sample on the
-            // next event-loop turn. Do not reset a running gesture's timer.
-            armSample();
+            // next event-loop turn. A normal pointer move has no drag target
+            // and must not wake a timer. Do not require the drag threshold yet:
+            // this very motion may cross it after our hook returns.
+            const auto* controller = g_layoutManager ? g_layoutManager->dragController().get() : nullptr;
+            if (tracker.active || !pendingEnd.empty() || (controller && controller->mode() == MBIND_MOVE && controller->target()))
+                armSample();
         });
         buttonListener = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo&) {
             if (e.button != BTN_LEFT || e.state != WL_POINTER_BUTTON_STATE_RELEASED)

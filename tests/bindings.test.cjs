@@ -14,6 +14,7 @@ function configured(tsv = "", nativeBridge = false) {
       })
     end
     hl = {dsp=dispatcher("hl.dsp"), unbind=function(key) print("unbind\\t" .. key) end,
+      layer_rule=function(rule) print("layer\\t" .. rule.match.namespace .. "\\t" .. tostring(rule.no_anim) .. "\\t" .. rule.animation) end,
       dispatch=function(action) print("dispatch\\t" .. action.args) end}
     if ${nativeBridge} then
       hl.plugin = {orbit={
@@ -41,6 +42,10 @@ function configured(tsv = "", nativeBridge = false) {
   `;
   return execFileSync("lua", ["-"], {input: lua, encoding: "utf8"}).trim().split("\n").map(line => line.split("\t"));
 }
+test("only the switcher and handoff bypass compositor fades", () => {
+  const layers = configured().filter(row => row[0] === "layer");
+  assert.deepEqual(layers, [["layer", "^(omarchy-window-switcher|omarchy-orbit-handoff)$", "true", "none"]]);
+});
 test("Alt+Tab owns forward/reverse shortcuts and unbinds existing ones", () => {
   const rows = configured();
   for (const key of ["ALT + TAB", "ALT + SHIFT + TAB"])

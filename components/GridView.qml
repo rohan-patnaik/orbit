@@ -26,6 +26,8 @@ Item {
   implicitHeight: layoutData.height
 
   function navigationTarget(index, direction) {
+    if (direction === "left" || direction === "right")
+      return Logic.wrapIndex(index + (direction === "left" ? -1 : 1), root.windows.length)
     const localIndex = index - root.firstIndex
     const target = Logic.gridMoveByLayout(localIndex, direction, root.layoutData.items)
     return target < 0 ? index : root.firstIndex + target

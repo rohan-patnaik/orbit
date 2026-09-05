@@ -42,6 +42,6 @@ test("repository contains no internal symbolic links", () => {
 
 test("Hyprland-derived labels are rendered as plain text", () => {
   assert.match(windowCard, /text:\s*root\.windowData \? root\.windowData\.label : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
-  assert.match(overlay, /text:\s*root\.entries\.length > 0 \? root\.entries\[root\.selectedIndex\]\.title : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
+  assert.match(overlay, /text:\s*root\.entries\[root\.selectedIndex\] \? root\.entries\[root\.selectedIndex\]\.title : ""\s*\n\s*textFormat:\s*Text\.PlainText/);
   assert.match(iconsView, /text:\s*tile\.modelData\.label\s*\n\s*textFormat:\s*Text\.PlainText/);
 });

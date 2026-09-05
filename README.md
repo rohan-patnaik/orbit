@@ -40,6 +40,25 @@ download icons. Icons mode chooses a light or dark backplate from the actual ico
 pixels, including themed image-provider icons. A monogram is used when the icon is
 missing or fails to load.
 
+Orbit reduces work on the switching path: ordinary switches
+use a 16 ms initial unmap timer, then advance as soon as the compositor confirms
+focus. Resize handoffs retain their 40 ms capture head start and 80 ms rendering
+guard. These are configured waits, not measured end-to-end latency guarantees.
+Native Alt holds need no modifier-polling processes; unloading the bridge restores
+the fallback. Native gestures wait 75 ms after the window query before presenting
+the picker, while release activates immediately. Quick taps avoid the picker and
+its captures entirely. Ordinary tiled switches allocate no full-screen handoff
+capture. Resize covers wait for capture content and freeze immediately before
+activation. Orbit's picker and cover bypass compositor fades. Flip retains the
+previews already in view and updates selection without continuous animation.
+
+The capture count is bounded, but capture memory is still affected by the source
+window resolution: Quickshell's `constraintSize` controls display sizing, not a
+lower-resolution capture buffer. Grid limits itself to 12 previews per page and
+Flip to seven visible previews; they remain still images to avoid continuous
+capture work. See the [performance validation](docs/PERFORMANCE-2026-09-05.md) for
+the measured desktop latency, captured transitions, resource results, and limits.
+
 Each switch session is built from one fresh Hyprland client query ordered by
 `focusHistoryID`. The active window is first, the last-used window is second, and
 releasing Alt activates the current selection, matching Windows-style MRU cycling.
