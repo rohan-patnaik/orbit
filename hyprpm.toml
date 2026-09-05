@@ -3,7 +3,7 @@ name = "orbit"
 authors = ["Rohan Patnaik"]
 
 [orbit-drag]
-description = "Native top-edge window drag bridge for Orbit Snap Layouts"
+description = "Live snap gestures and Wayland surface-readiness bridge for Orbit"
 authors = ["Rohan Patnaik"]
 output = "native/orbit-drag.so"
 build = [

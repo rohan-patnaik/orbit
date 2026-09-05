@@ -17,7 +17,6 @@ Item {
   property bool opened: false
   property bool releaseToActivate: false
   property string releaseModifier: ""
-  property bool sawKeyEvent: false
   property bool hoverArmed: false
   property point initialPointerPosition: Qt.point(-1, -1)
   property var windows: []
@@ -43,7 +42,11 @@ Item {
   property bool activationCommitSettling: false
   property bool activationCommitFinalizing: false
   property bool activationTargetSurfaceReady: false
+  property bool activationNativeFocusAvailable: false
+  property bool activationFocusConfirmed: false
   property int activationCommitAttempts: 0
+  property string activationReadiness: "none"
+  property int activationGeneration: 0
   readonly property int activationCommitAttemptLimit: 50
   property bool snapshotPending: false
   property bool snapshotCancelled: false
@@ -51,10 +54,17 @@ Item {
   property string pendingModifier: ""
   property int pendingDirection: 1
   property int queuedSteps: 0
+  property bool snapshotRestartPending: false
+  property var deferredSwitchGestures: []
+  property bool pendingGestureReleased: false
+  property string switcherInputSource: "global"
+  property bool inputTraceEnabled: false
+  property var inputTrace: []
+  property var lastHandoff: ({})
   property string managerMode: ""
   property var windowModes: Logic.defaultWindowModes()
   property var settingsDraft: Logic.defaultWindowModes()
-  property var snapLayouts: Logic.snapLayouts()
+  property var snapLayouts: Logic.availableSnapLayouts(root.windowModes)
   property int snapSelectedLayout: 0
   property int snapSelectedSlot: 0
   property var snapTargetWindow: null
@@ -71,6 +81,88 @@ Item {
   property var pendingSnapGroup: null
   property var snapAnimationAddresses: []
   property string snapPendingFocusAddress: ""
+  property var dragEvent: null
+  property var dragState: ({
+      visible: false,
+      session: 0,
+      monitorId: -1,
+      anchor: "top"
+    })
+  property var dragSelection: null
+  property int dragShownCount: 0
+  property int dragDropCount: 0
+  property string dragLastOutcome: "none"
+  property bool snapQueryPending: false
+  property var snapMonitorRows: []
+
+  function traceInput(action, detail) {
+    if (!root.inputTraceEnabled)
+      return
+    const trace = root.inputTrace.slice(-255)
+    trace.push({
+      time: Date.now(),
+      action: action,
+      detail: detail,
+      opened: root.opened,
+      pending: root.snapshotPending,
+      committing: root.activationCommitInProgress,
+      selected: root.entries[root.selectedIndex] ? root.entries[root.selectedIndex].address : "",
+      released: root.pendingGestureReleased,
+      deferred: root.deferredSwitchGestures
+    })
+    root.inputTrace = trace
+  }
+
+  function handleDragEvent(text) {
+    let event
+    try {
+      event = JSON.parse(text)
+    } catch (error) {
+      return
+    }
+    if (event.protocol !== 1 || !event.window || !Logic.safeAddress(event.window.address))
+      return
+    if (event.phase === "end" || event.phase === "cancel") {
+      if (event.session !== root.dragState.session)
+        return
+      const sameMonitor = event.monitor && Number(event.monitor.id) === Number(root.dragState.monitorId)
+      const hit = event.phase === "end" && sameMonitor && root.dragState.visible && dragLayer.item ? dragLayer.item.hitTest(event.x, event.y) : null
+      root.dragState = Object.assign({}, root.dragState, {
+        visible: false
+      })
+      root.dragLastOutcome = hit ? "dropped" : event.phase === "cancel" ? "cancelled" : "released-outside"
+      if (hit) {
+        root.snapTargetWindow = event.window
+        root.snapTargetMonitor = event.monitor
+        root.snapSelectedLayout = hit.layout
+        root.snapSelectedSlot = hit.slot
+        root.targetScreen = root.screenForMonitorName(event.monitor.name)
+        root.dragDropCount++
+        root.chooseSnapSlot(hit.layout, hit.slot)
+      }
+      return
+    }
+    if (event.phase !== "move" || root.opened || root.activationCommitInProgress || root.managerMode !== "" || root.snapQueryPending)
+      return
+    const bounds = dragLayer.item ? dragLayer.item.cardGeometry : null
+    const next = Logic.dragPresentation(root.dragState, event, bounds)
+    if (next.visible && !root.dragState.visible) {
+      root.windowModes = root.configuredWindowModes()
+      root.dragShownCount++
+      root.dragLastOutcome = "shown-during-drag"
+      root.windowScope = root.configuredScope()
+      root.captureFocusContext()
+      root.snapClientRows = []
+      if (!snapClientsQuery.running)
+        snapClientsQuery.running = true
+    }
+    if (root.snapLayouts.length === 0)
+      next.visible = false
+    root.dragEvent = event
+    root.dragState = next
+    root.dragSelection = next.visible && dragLayer.item ? dragLayer.item.hitTest(event.x, event.y) : null
+    dragWatchdog.restart()
+  }
 
   function applicationInfo(applicationClass, initialClass, appId) {
     const originalClass = String(applicationClass || "").trim()
@@ -164,7 +256,7 @@ Item {
   function captureFocusContext() {
     const workspace = Hyprland.focusedWorkspace
     const monitor = Hyprland.focusedMonitor
-    if (!workspace || !monitor || Number(workspace.id) <= 0)
+    if (!workspace || !monitor || String(workspace.name || "").startsWith("special:"))
       return false
 
     root.snapshotWorkspaceId = Number(workspace.id)
@@ -258,7 +350,8 @@ Item {
   }
 
   function completeWindowQuery(text) {
-    if (!root.snapshotPending)
+    root.traceInput("snapshot-result", "")
+    if (!root.snapshotPending || root.snapshotRestartPending)
       return
     root.snapshotPending = false
     if (root.snapshotCancelled)
@@ -280,16 +373,19 @@ Item {
     root.selectedIndex = Logic.wrapIndex(initialIndex + root.queuedSteps, nextEntries.length)
     root.releaseToActivate = root.pendingActivateOnRelease
     root.releaseModifier = root.pendingActivateOnRelease ? root.pendingModifier : ""
-    root.sawKeyEvent = false
     root.hoverArmed = false
     root.initialPointerPosition = Qt.point(-1, -1)
     root.opened = true
     watchdog.restart()
+    if (root.pendingGestureReleased)
+      root.accept()
   }
 
-  function startSwitcher(activateOnRelease, modifier, direction) {
+  function startSwitcher(activateOnRelease, modifier, direction, inputSource) {
+    root.traceInput("start", direction)
     root.mode = root.configuredMode()
     root.windowScope = root.configuredScope()
+    root.windowModes = root.configuredWindowModes()
     if (!root.captureFocusContext())
       return
     root.targetScreen = root.switcherScreen()
@@ -299,7 +395,13 @@ Item {
     root.pendingModifier = String(modifier || "")
     root.pendingDirection = direction
     root.queuedSteps = 0
-    windowQuery.running = true
+    root.pendingGestureReleased = false
+    root.switcherInputSource = inputSource || "global"
+    // A cancelled Process can still be delivering its old stdout. Drain that
+    // generation before starting another query, never reuse its old snapshot.
+    root.snapshotRestartPending = windowQuery.running
+    if (!root.snapshotRestartPending)
+      windowQuery.running = true
   }
 
   function open(payloadJson) {
@@ -414,6 +516,7 @@ Item {
   }
 
   function closeManager() {
+    root.snapQueryPending = false
     root.managerMode = ""
     root.snapTargetWindow = null
     root.snapTargetMonitor = null
@@ -424,12 +527,21 @@ Item {
   }
 
   function openSnapManager() {
+    if (root.snapQueryPending) {
+      root.closeManager()
+      return
+    }
     if (root.managerMode !== "") {
       root.closeManager()
       return
     }
     root.cancel()
+    if (snapActiveQuery.running || snapMonitorQuery.running || snapClientsQuery.running || root.activationCommitInProgress)
+      return
     root.windowScope = root.configuredScope()
+    root.windowModes = root.configuredWindowModes()
+    if (root.snapLayouts.length === 0)
+      return
     if (!root.captureFocusContext())
       return
     root.snapSelectedLayout = 0
@@ -442,12 +554,16 @@ Item {
     root.snapActiveReady = false
     root.snapMonitorReady = false
     root.snapClientsReady = false
+    root.snapMonitorRows = []
+    root.snapQueryPending = true
     snapActiveQuery.running = true
     snapMonitorQuery.running = true
     snapClientsQuery.running = true
   }
 
   function completeSnapActive(text) {
+    if (!root.snapQueryPending)
+      return
     try {
       const active = JSON.parse(text)
       const address = Logic.safeAddress(active.address)
@@ -473,17 +589,10 @@ Item {
   }
 
   function completeSnapMonitors(text) {
+    if (!root.snapQueryPending)
+      return
     try {
-      const monitors = JSON.parse(text)
-      const monitorId = root.snapTargetWindow ? root.snapTargetWindow.monitorId : root.snapshotMonitorId
-      for (const monitor of monitors) {
-        if (Number(monitor.id) === Number(monitorId)) {
-          root.snapTargetMonitor = monitor
-          root.snapshotMonitorName = String(monitor.name || root.snapshotMonitorName)
-          root.targetScreen = root.focusedScreen()
-          break
-        }
-      }
+      root.snapMonitorRows = JSON.parse(text)
     } catch (error) {
       console.warn("window-switcher: unable to read monitors for snap:", error)
     }
@@ -503,12 +612,16 @@ Item {
   }
 
   function maybeOpenSnapManager() {
-    if (!root.snapActiveReady || !root.snapMonitorReady || !root.snapClientsReady)
+    if (!root.snapQueryPending || !root.snapActiveReady || !root.snapMonitorReady || !root.snapClientsReady)
       return
+    root.snapQueryPending = false
+    const monitorId = root.snapTargetWindow ? root.snapTargetWindow.monitorId : -1
+    root.snapTargetMonitor = root.snapMonitorRows.find(monitor => Number(monitor.id) === monitorId) || null
     if (!root.snapTargetWindow || !root.snapTargetMonitor) {
       console.warn("window-switcher: snap layouts need an active window and monitor")
       return
     }
+    root.targetScreen = root.screenForMonitorName(root.snapTargetMonitor.name)
     root.managerMode = "snap"
   }
 
@@ -536,17 +649,52 @@ Item {
     root.snapRestoreStates = saved
   }
 
+  function forgetRememberedFullscreen(address) {
+    const safeAddress = Logic.safeAddress(address)
+    if (!safeAddress || !root.rememberedFullscreenStates[safeAddress])
+      return
+    const remembered = Object.assign({}, root.rememberedFullscreenStates)
+    delete remembered[safeAddress]
+    root.rememberedFullscreenStates = remembered
+  }
+
   function snapWindow(window, layoutIndex, slotIndex) {
     const geometry = root.snapGeometry(layoutIndex, slotIndex)
     const address = window ? Logic.safeAddress(window.address) : ""
     if (!geometry || !address)
       return false
     root.rememberSnapState(window)
+    // Snapping is an explicit transition to windowed geometry. Do not let a
+    // fullscreen state remembered by an earlier Alt+Tab session override it.
+    root.forgetRememberedFullscreen(address)
     Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "true", window = "address:' + address + '" })')
     Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = 0, action = "set", window = "address:' + address + '" })')
     Hyprland.dispatch('hl.dsp.window.float({ action = "set", window = "address:' + address + '" })')
-    Hyprland.dispatch('hl.dsp.window.move({ x = ' + geometry.x + ', y = ' + geometry.y + ', relative = false, window = "address:' + address + '" })')
+    // Hyprland keeps a floating window centered while resizing it. Resize first,
+    // then apply the absolute position so the selected slot remains exact.
     Hyprland.dispatch('hl.dsp.window.resize({ x = ' + geometry.width + ', y = ' + geometry.height + ', relative = false, window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.move({ x = ' + geometry.x + ', y = ' + geometry.y + ', relative = false, window = "address:' + address + '" })')
+    const animationAddresses = root.snapAnimationAddresses.slice()
+    if (!animationAddresses.includes(address))
+      animationAddresses.push(address)
+    root.snapAnimationAddresses = animationAddresses
+    snapAnimationRelease.restart()
+    root.snapPendingFocusAddress = address
+    return true
+  }
+
+  function applySnapAction(window, action) {
+    const address = window ? Logic.safeAddress(window.address) : ""
+    const internalState = action === "maximized" ? 1 : action === "fullscreen" ? 2 : 0
+    if (!address || internalState === 0)
+      return false
+    root.rememberSnapState(window)
+    root.forgetRememberedFullscreen(address)
+    root.snapGroups = root.snapGroups.filter(group => !group.addresses.includes(address))
+    Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "true", window = "address:' + address + '" })')
+    // An explicit layout choice has the same client state as Super+F/Super+Alt+F.
+    // Unlike Alt+Tab, choosing Maximized intentionally exits app fullscreen.
+    Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = ' + internalState + ', client = ' + internalState + ', action = "set", window = "address:' + address + '" })')
     const animationAddresses = root.snapAnimationAddresses.slice()
     if (!animationAddresses.includes(address))
       animationAddresses.push(address)
@@ -557,9 +705,20 @@ Item {
   }
 
   function chooseSnapSlot(layoutIndex, slotIndex) {
+    const layout = root.snapLayouts[layoutIndex]
+    if (!layout)
+      return
+    root.snapSelectedLayout = layoutIndex
+    root.snapSelectedSlot = slotIndex
+    if (layout.action) {
+      if (!root.applySnapAction(root.snapTargetWindow, String(layout.action)))
+        return
+      root.managerMode = ""
+      snapFocusTimer.restart()
+      return
+    }
     if (!root.snapWindow(root.snapTargetWindow, layoutIndex, slotIndex))
       return
-    const layout = root.snapLayouts[layoutIndex]
     const remaining = []
     for (let index = 0; index < layout.slots.length; index++) {
       if (index !== slotIndex)
@@ -642,25 +801,110 @@ Item {
       for (const memberAddress of group.addresses) {
         if (memberAddress === safeAddress)
           continue
-        Hyprland.dispatch('hl.dsp.window.alter_zorder({ top = true, window = "address:' + memberAddress + '" })')
+        Hyprland.dispatch('hl.dsp.window.alter_zorder({ mode = "top", window = "address:' + memberAddress + '" })')
       }
-      Hyprland.dispatch('hl.dsp.window.alter_zorder({ top = true, window = "address:' + safeAddress + '" })')
+      Hyprland.dispatch('hl.dsp.window.alter_zorder({ mode = "top", window = "address:' + safeAddress + '" })')
       return
     }
   }
 
   function cycle(step) {
+    root.traceInput("cycle", step)
     root.selectedIndex = Logic.wrapIndex(root.selectedIndex + step, root.entries.length)
     watchdog.restart()
   }
 
-  function invokeShortcut(step) {
-    if (root.opened)
+  function invokeShortcut(step, inputSource) {
+    const source = inputSource || "global"
+    root.traceInput(source + "-step", step)
+    if (root.activationCommitInProgress || (root.snapshotPending && root.pendingGestureReleased)) {
+      const gestures = root.deferredSwitchGestures.slice()
+      const last = gestures.length > 0 ? gestures[gestures.length - 1] : null
+      if (last && !last.released)
+        gestures[gestures.length - 1] = {
+          steps: last.steps.concat([step]),
+          released: false,
+          source: last.source
+        }
+      else
+        gestures.push({
+          steps: [step],
+          released: false,
+          source: source
+        })
+      root.deferredSwitchGestures = gestures
+    } else if (root.opened)
       root.cycle(step)
     else if (root.snapshotPending)
       root.queuedSteps += step
     else
-      root.startSwitcher(true, "alt", step)
+      root.startSwitcher(true, "alt", step, source)
+  }
+
+  function observeSwitcherStep(text) {
+    try {
+      const event = JSON.parse(text)
+      if (event.protocol === 1 && (event.step === 1 || event.step === -1))
+        root.invokeShortcut(event.step, "native")
+    } catch (error) {}
+  }
+
+  function observeSwitcherFallback(text) {
+    try {
+      if (JSON.parse(text).protocol !== 1)
+        return
+      root.switcherInputSource = "global"
+      root.deferredSwitchGestures = root.deferredSwitchGestures.map(gesture => Object.assign({}, gesture, {
+          source: "global"
+        }))
+    } catch (error) {}
+  }
+
+  function observeSwitcherRelease(text) {
+    root.traceInput("native-release", "")
+    let event
+    try {
+      event = JSON.parse(text)
+    } catch (error) {
+      return
+    }
+    if (event.protocol !== 1)
+      return
+    const gestures = root.deferredSwitchGestures.slice()
+    if (gestures.length > 0) {
+      const last = gestures[gestures.length - 1]
+      gestures[gestures.length - 1] = {
+        steps: last.steps,
+        released: true,
+        source: last.source
+      }
+      root.deferredSwitchGestures = gestures
+    } else if (root.snapshotPending && root.pendingModifier === "alt") {
+      root.pendingGestureReleased = true
+    } else if (root.opened && root.releaseToActivate && root.releaseModifier === "alt") {
+      root.accept()
+    }
+  }
+
+  function observeSwitcherCancel(text) {
+    root.traceInput("native-cancel", "")
+    try {
+      if (JSON.parse(text).protocol === 1 && (root.opened || root.snapshotPending))
+        root.cancel()
+    } catch (error) {}
+  }
+
+  function observeModifierState(text) {
+    root.traceInput("modifier-poll", text.trim())
+    if (!root.opened || !root.releaseToActivate)
+      return
+    const state = text.trim()
+    if (state.endsWith("true"))
+      watchdog.restart()
+    else if (state.endsWith("false") && root.switcherInputSource !== "native")
+      root.accept()
+    // A failed IPC query is not proof the user released Alt. The watchdog
+    // remains a bounded cancellation fallback if input reporting is broken.
   }
 
   function releaseModifierExpression() {
@@ -683,8 +927,9 @@ Item {
       root.cycle(direction === "left" || direction === "up" ? -1 : 1)
       return
     }
-    if (viewLoader.item && typeof viewLoader.item.navigationTarget === "function")
-      root.select(viewLoader.item.navigationTarget(root.selectedIndex, direction))
+    const view = switcherLayer.item ? switcherLayer.item.loadedView : null
+    if (view && typeof view.navigationTarget === "function")
+      root.select(view.navigationTarget(root.selectedIndex, direction))
   }
 
   function fullscreenSnapshot(window) {
@@ -717,6 +962,7 @@ Item {
   }
 
   function prepareFullscreenHandoff(source, selected) {
+    root.lastHandoff = ({})
     root.pendingFullscreenRelease = null
     root.pendingFullscreenRestore = null
     root.handoffRestoresTargetFirst = false
@@ -728,21 +974,32 @@ Item {
     if (!sourceAddress || !selectedAddress || sourceAddress === selectedAddress)
       return
     root.rememberSourceFullscreen(source)
-    if (!Logic.sameWorkspace(source, selected))
-      return
-    const selectedSnapshot = root.rememberedFullscreenStates[selectedAddress] || root.fullscreenSnapshot(selected)
-    const desiredInternalState = selectedSnapshot ? Logic.resumableFullscreenState(selectedSnapshot.internal, selectedSnapshot.client) : 0
-    if (selectedSnapshot) {
+    const desiredInternalState = Logic.desiredWindowState(selected, root.rememberedFullscreenStates[selectedAddress], root.windowModes)
+    root.lastHandoff = {
+      source: sourceAddress,
+      sourceInternal: source.fullscreenState,
+      target: selectedAddress,
+      targetInternal: selected.fullscreenState,
+      targetClient: selected.clientFullscreenState,
+      desired: desiredInternalState
+    }
+    if (desiredInternalState > 0 && Logic.fullscreenState(selected.fullscreenState) !== desiredInternalState) {
       root.pendingFullscreenRestore = {
         address: selectedAddress,
-        internal: desiredInternalState
+        internal: desiredInternalState,
+        client: desiredInternalState === 1 && Logic.fullscreenState(selected.clientFullscreenState) === 0 ? 1 : -1
       }
+    }
+
+    if (!Logic.sameWorkspace(source, selected)) {
+      if (desiredInternalState > 0 && Logic.fullscreenState(selected.fullscreenState) !== desiredInternalState)
+        root.suppressHandoffAnimations([selectedAddress])
+      return
     }
 
     const handoff = Logic.fullscreenHandoffPlan(source.fullscreenState, selected.fullscreenState, desiredInternalState)
     root.handoffRestoresTargetFirst = handoff.restoreTargetBeforeFocus
-    const targetAlreadyMatchesSourceSize = handoff.restoreTargetBeforeFocus && !Logic.dimensionsDiffer(source.previewWidth, source.previewHeight, selected.previewWidth, selected.previewHeight, 2)
-    root.handoffNeedsCover = handoff.targetResizes && !targetAlreadyMatchesSourceSize
+    root.handoffNeedsCover = handoff.targetResizes
     const suppressAnimations = handoff.releaseSource || handoff.targetResizes
     if (suppressAnimations)
       root.suppressHandoffAnimations([sourceAddress, selectedAddress])
@@ -773,26 +1030,17 @@ Item {
     root.handoffAnimationAddresses = []
   }
 
-  function restoreSelectedFullscreen() {
-    const restore = root.pendingFullscreenRestore
-    if (!restore || restore.internal <= 0)
-      return
-    Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = ' + restore.internal + ', client = -1, action = "set", window = "address:' + restore.address + '" })')
-  }
-
   function requestPendingActivation() {
     const selected = root.pendingWindow
-    if (!selected)
+    if (!selected || activationDispatch.running)
       return
-    if (root.handoffRestoresTargetFirst)
-      root.restoreSelectedFullscreen()
+    // Resolve live state and perform the entire handoff on one compositor
+    // transaction. Retrying is safe even if a layer unmap restored old focus:
+    // no toggle-style -1 sentinel, no parallel Wayland activation request.
     const release = root.pendingFullscreenRelease
-    if (release) {
-      Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = -1, action = "set", window = "address:' + release.address + '" })')
-    }
-    root.raisePendingWindow()
-    if (!root.handoffRestoresTargetFirst)
-      root.restoreSelectedFullscreen()
+    const group = root.snapGroups.find(group => group.addresses.includes(selected.address))
+    activationDispatch.command = ["hyprctl", "eval", Logic.activationScript(release ? release.address : "", selected.address, root.lastHandoff.desired, root.handoffRestoresTargetFirst, selected.groupIndex, group ? group.addresses : [])]
+    activationDispatch.running = true
   }
 
   function raisePendingWindow() {
@@ -803,13 +1051,16 @@ Item {
     if (selected.groupIndex > 0) {
       Hyprland.dispatch('hl.dsp.group.active({ window = "address:' + selected.address + '", index = ' + selected.groupIndex + ' })')
     }
-    if (selected.wayland)
-      selected.wayland.activate()
+    // Keep activation on the ordered compositor IPC path. A foreign-toplevel
+    // activate request can overtake the source fullscreen release on Wayland,
+    // making Hyprland implicitly clear the browser's client fullscreen state.
     Hyprland.dispatch('hl.dsp.focus({ window = "address:' + selected.address + '" })')
     Hyprland.dispatch('hl.dsp.window.bring_to_top()')
   }
 
   function abortActivationCommit() {
+    root.traceInput("abort", "")
+    activationDispatch.running = false
     activationCommitTimer.stop()
     activationSettleTimer.stop()
     activationRevealTimer.stop()
@@ -826,12 +1077,14 @@ Item {
     root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
+    root.deferredSwitchGestures = []
     root.releaseToActivate = false
     root.releaseModifier = ""
     watchdog.restart()
   }
 
   function finishActivationCommit() {
+    root.traceInput("hide", "")
     if (root.activationCommitFinalizing)
       return
     activationCommitTimer.stop()
@@ -843,6 +1096,7 @@ Item {
   }
 
   function finalizeActivationCommit() {
+    root.traceInput("finalize", "")
     activationFinalizeTimer.stop()
     root.releaseHandoffAnimations()
     root.raisePendingWindow()
@@ -856,6 +1110,14 @@ Item {
     root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
     root.activationCommitAttempts = 0
+    const deferred = root.deferredSwitchGestures
+    if (deferred.length > 0) {
+      const gesture = deferred[0]
+      root.deferredSwitchGestures = deferred.slice(1)
+      root.startSwitcher(true, "alt", gesture.steps[0], gesture.source)
+      root.queuedSteps = gesture.steps.slice(1).reduce((total, step) => total + step, 0)
+      root.pendingGestureReleased = gesture.released
+    }
   }
 
   function advanceActivationCommit() {
@@ -874,7 +1136,7 @@ Item {
     }
 
     const active = Hyprland.activeToplevel
-    const selectedIsActive = active && Logic.safeAddress(active.address) === Logic.safeAddress(selected.address)
+    const selectedIsActive = root.activationNativeFocusAvailable ? root.activationFocusConfirmed : active && Logic.safeAddress(active.address) === Logic.safeAddress(selected.address)
     if (!selectedIsActive) {
       root.requestPendingActivation()
       if (root.activationCommitAttempts < root.activationCommitAttemptLimit)
@@ -896,13 +1158,36 @@ Item {
     root.finishActivationCommit()
   }
 
-  function observeActivationTargetSurface(width, height) {
-    if (!root.activationCommitInProgress || !root.handoffNeedsCover || !root.pendingWindow)
+  function observeActivationTargetCommit(text, generation) {
+    if (!root.activationCommitInProgress || !root.pendingWindow)
       return
-    if (root.activationTargetSurfaceReady)
+    if (generation !== root.activationGeneration)
       return
-    if (!Logic.dimensionsDiffer(width, height, root.pendingWindow.previewWidth, root.pendingWindow.previewHeight, 2))
+    let state
+    try {
+      state = JSON.parse(text)
+    } catch (error) {
+      if (root.handoffNeedsCover)
+        root.activationReadiness = "fallback-unavailable"
       return
+    }
+    if (state.protocol !== 1 || Logic.safeAddress(state.address) !== root.pendingWindow.address)
+      return
+    root.traceInput("native-state", state)
+    if (typeof state.active === "boolean") {
+      root.activationNativeFocusAvailable = true
+      root.activationFocusConfirmed = state.active
+    }
+    if (!root.handoffNeedsCover || root.activationTargetSurfaceReady)
+      return
+    if (!state.supported) {
+      root.activationReadiness = "fallback-unsupported"
+      return
+    }
+    const expectedMode = root.pendingFullscreenRestore ? root.pendingFullscreenRestore.internal : 0
+    if (state.protocol !== 1 || Logic.safeAddress(state.address) !== root.pendingWindow.address || state.internal !== expectedMode || !state.ready)
+      return
+    root.activationReadiness = "committed"
     root.activationTargetSurfaceReady = true
     if (root.activationCommitSettling) {
       activationSettleTimer.stop()
@@ -911,6 +1196,7 @@ Item {
   }
 
   function finish(activate) {
+    root.traceInput("finish", activate)
     if (!root.opened || root.activationCommitInProgress)
       return
     const selected = activate && root.selectedIndex >= 0 ? root.entries[root.selectedIndex] : null
@@ -927,8 +1213,32 @@ Item {
     root.activationCommitSettling = false
     root.activationCommitFinalizing = false
     root.activationTargetSurfaceReady = false
+    root.activationNativeFocusAvailable = false
+    root.activationFocusConfirmed = false
+    root.activationReadiness = root.handoffNeedsCover ? "waiting" : "not-needed"
+    root.activationGeneration++
     root.activationCommitAttempts = 0
     activationCommitTimer.restart()
+  }
+
+  function handleClientFullscreen(text) {
+    let event
+    try {
+      event = JSON.parse(text)
+    } catch (error) {
+      return
+    }
+    const address = Logic.safeAddress(event.address)
+    if (event.protocol !== 1 || !address || event.requested !== false || event.internal !== 0 || event.client !== 0 || event.floating || event.pinned)
+      return
+    // An app voluntarily leaving media fullscreen is distinct from a user's
+    // manual tiling shortcut. Respect the personal default, not a global rule.
+    root.forgetRememberedFullscreen(address)
+    const modes = root.configuredWindowModes()
+    if (!modes.maximized || modes.defaultMode !== "maximized" || root.activationCommitInProgress || root.managerMode !== "" || mediaExitRestore.running)
+      return
+    mediaExitRestore.command = ["hyprctl", "eval", Logic.mediaExitRestoreScript(address)]
+    mediaExitRestore.running = true
   }
 
   function accept() {
@@ -936,9 +1246,11 @@ Item {
   }
 
   function cancel() {
+    root.deferredSwitchGestures = []
     if (root.snapshotPending) {
       root.snapshotCancelled = true
       root.snapshotPending = false
+      root.snapshotRestartPending = false
     }
     root.finish(false)
   }
@@ -956,8 +1268,6 @@ Item {
   }
 
   function pruneClosedWindows() {
-    if (!root.opened)
-      return
     const selected = root.entries[root.selectedIndex]
     const selectedAddress = selected ? selected.address : ""
     const liveAddresses = ({})
@@ -976,6 +1286,16 @@ Item {
         }))
     }
     root.snapGroups = nextGroups
+    for (const property of ["rememberedFullscreenStates", "snapRestoreStates"]) {
+      const next = ({})
+      for (const address of Object.keys(root[property])) {
+        if (liveAddresses[address])
+          next[address] = root[property][address]
+      }
+      root[property] = next
+    }
+    if (!root.opened)
+      return
     const remaining = root.windows.filter(window => liveAddresses[window.address] === true)
     if (remaining.length === root.windows.length)
       return
@@ -994,6 +1314,18 @@ Item {
     command: ["hyprctl", "-j", "clients"]
     stdout: StdioCollector {
       onStreamFinished: root.completeWindowQuery(text)
+    }
+  }
+
+  Timer {
+    interval: 1
+    repeat: true
+    running: root.snapshotRestartPending
+    onTriggered: {
+      if (windowQuery.running)
+        return
+      root.snapshotRestartPending = false
+      windowQuery.running = true
     }
   }
 
@@ -1024,6 +1356,17 @@ Item {
   Process {
     id: settingsReload
     command: ["hyprctl", "reload"]
+  }
+
+  Process {
+    id: mediaExitRestore
+  }
+
+  Process {
+    id: activationDispatch
+    stdout: StdioCollector {
+      onStreamFinished: root.traceInput("activation-result", text.trim())
+    }
   }
 
   GlobalShortcut {
@@ -1059,10 +1402,104 @@ Item {
   }
 
   Connections {
+    target: Hyprland
+
+    function onRawEvent(event) {
+      if (event.name === "orbitdrag")
+        root.handleDragEvent(event.data)
+      else if (event.name === "orbitclientfullscreen")
+        root.handleClientFullscreen(event.data)
+      else if (event.name === "orbitswitchrelease")
+        root.observeSwitcherRelease(event.data)
+      else if (event.name === "orbitswitchstep")
+        root.observeSwitcherStep(event.data)
+      else if (event.name === "orbitswitchfallback")
+        root.observeSwitcherFallback(event.data)
+      else if (event.name === "orbitswitchcancel")
+        root.observeSwitcherCancel(event.data)
+    }
+  }
+
+  IpcHandler {
+    target: "orbit-diagnostics"
+
+    function trace(enabled: bool): string {
+      root.inputTraceEnabled = enabled
+      root.inputTrace = []
+      return enabled ? "enabled" : "disabled"
+    }
+
+    function events(): string {
+      return JSON.stringify(root.inputTrace)
+    }
+
+    function state(): string {
+      return JSON.stringify({
+        opened: root.opened,
+        mode: root.mode,
+        scope: root.windowScope,
+        screen: root.targetScreen ? root.targetScreen.name : "",
+        selected: root.entries[root.selectedIndex] ? root.entries[root.selectedIndex].address : "",
+        entries: root.entries.map(window => ({
+              address: window.address,
+              app: window.applicationClass,
+              monitor: window.monitorId,
+              icon: window.iconSource
+            })),
+        committing: root.activationCommitInProgress,
+        readiness: root.activationReadiness,
+        nativeFocus: root.activationNativeFocusAvailable,
+        focusConfirmed: root.activationFocusConfirmed,
+        input: {
+          pending: root.snapshotPending,
+          released: root.pendingGestureReleased,
+          releaseToActivate: root.releaseToActivate,
+          modifier: root.releaseModifier,
+          source: root.switcherInputSource,
+          deferred: root.deferredSwitchGestures
+        },
+        handoff: root.lastHandoff,
+        manager: root.managerMode,
+        drag: {
+          visible: root.dragState.visible,
+          session: root.dragState.session,
+          screen: root.dragEvent ? root.dragEvent.monitor.name : "",
+          selection: root.dragSelection,
+          shown: root.dragShownCount,
+          dropped: root.dragDropCount,
+          outcome: root.dragLastOutcome
+        }
+      })
+    }
+  }
+
+  Connections {
     target: Hyprland.toplevels
 
     function onValuesChanged() {
       root.pruneClosedWindows()
+    }
+  }
+
+  Timer {
+    id: dragWatchdog
+    interval: 1000
+    onTriggered: root.dragState = Object.assign({}, root.dragState, {
+      visible: false
+    })
+  }
+
+  LazyLoader {
+    id: dragLayer
+    active: root.dragState.visible && root.dragEvent !== null
+
+    DragSnapOverlay {
+      screen: root.screenForMonitorName(root.dragEvent.monitor.name)
+      gesture: root.dragEvent
+      presentation: root.dragState
+      layouts: root.snapLayouts
+      selectedLayout: root.dragSelection ? root.dragSelection.layout : -1
+      selectedSlot: root.dragSelection ? root.dragSelection.slot : -1
     }
   }
 
@@ -1082,7 +1519,31 @@ Item {
   Timer {
     id: activationSettleTimer
     interval: 1600
-    onTriggered: root.finishActivationCommit()
+    onTriggered: {
+      root.activationReadiness = "timeout"
+      root.finishActivationCommit()
+    }
+  }
+
+  Process {
+    id: activationReadinessQuery
+    property int generation: 0
+    stdout: StdioCollector {
+      onStreamFinished: root.observeActivationTargetCommit(text, activationReadinessQuery.generation)
+    }
+  }
+
+  Timer {
+    interval: 32
+    repeat: true
+    running: root.activationCommitInProgress && !root.activationCommitFinalizing
+    onTriggered: {
+      if (activationReadinessQuery.running || !root.pendingWindow)
+        return
+      activationReadinessQuery.generation = root.activationGeneration
+      activationReadinessQuery.command = ["hyprctl", "orbit-window-ready", root.pendingWindow.address]
+      activationReadinessQuery.running = true
+    }
   }
 
   Timer {
@@ -1152,8 +1613,8 @@ Item {
         id: managerCard
 
         anchors.centerIn: parent
-        width: root.managerMode === "settings" ? Style.space(560) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
-        height: root.managerMode === "settings" ? Style.space(430) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(330)
+        width: root.managerMode === "settings" ? Style.space(560) : root.managerMode === "snap" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(640)) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
+        height: root.managerMode === "settings" ? Style.space(490) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(360)
         radius: Style.cornerRadius * 2
         color: Color.menu.background
         border.width: 1
@@ -1161,6 +1622,7 @@ Item {
         focus: true
 
         Keys.onPressed: event => {
+          root.traceInput("qml-key", event.key)
           if (event.key === Qt.Key_Escape) {
             root.closeManager()
           } else if (root.managerMode === "snap") {
@@ -1304,265 +1766,272 @@ Item {
   }
 
   LazyLoader {
+    id: switcherLayer
     active: root.opened
 
-    PanelWindow {
-      id: panel
+    Scope {
+      readonly property var loadedView: panel.loadedView
 
-      screen: root.targetScreen
-      anchors {
-        top: true
-        bottom: true
-        left: true
-        right: true
-      }
-      color: "transparent"
-      exclusionMode: ExclusionMode.Ignore
-      WlrLayershell.namespace: "omarchy-window-switcher"
-      WlrLayershell.layer: WlrLayer.Overlay
-      WlrLayershell.keyboardFocus: root.activationCommitInProgress ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
+      PanelWindow {
+        id: panel
+        readonly property var loadedView: viewLoader.item
 
-      Timer {
-        id: modifierPollTimer
-        interval: 150
-        repeat: true
-        running: root.opened && root.releaseToActivate && !root.sawKeyEvent
-        onTriggered: {
-          if (!modifierCheck.running)
-            modifierCheck.running = true
+        // Unmap the actual grab surface at commit. Changing keyboardFocus to
+        // None before its initial map can leave a stale exclusive grab in the
+        // compositor. Keep the passive cover in a separate sibling window.
+        visible: !root.activationCommitInProgress
+        screen: root.targetScreen
+        anchors {
+          top: true
+          bottom: true
+          left: true
+          right: true
         }
-      }
-
-      Process {
-        id: modifierCheck
-        command: ["hyprctl", "eval", root.releaseModifierExpression()]
-        stdout: StdioCollector {
-          onStreamFinished: {
-            if (!root.opened || !root.releaseToActivate || root.sawKeyEvent)
-              return
-            if (!text.trim().endsWith("true"))
-              root.accept()
-          }
-        }
-      }
-
-      Rectangle {
-        id: switcherScrim
-
-        anchors.fill: parent
-        color: root.activationCommitInProgress && root.handoffNeedsCover ? Color.menu.background : Color.menu.scrim
-
-        TapHandler {
-          onTapped: root.cancel()
-        }
-      }
-
-      MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.NoButton
-        hoverEnabled: true
-        onPositionChanged: mouse => root.pointerMoved(mouse.x, mouse.y)
-      }
-
-      Rectangle {
-        id: switcherCard
-
-        anchors.centerIn: parent
-        width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
-        height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
-        radius: Style.cornerRadius * 2
-        color: Color.menu.background
-        border.width: 1
-        border.color: Color.menu.border
-        focus: true
-
-        Keys.onPressed: event => {
-          root.sawKeyEvent = true
-          if (event.key === Qt.Key_Escape) {
-            root.cancel()
-          } else if (event.key === Qt.Key_Q) {
-            root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
-          } else if (event.key === Qt.Key_Tab) {
-            root.navigate(event.modifiers & Qt.ShiftModifier ? "left" : "right")
-          } else if (event.key === Qt.Key_Backtab) {
-            root.cycle(-1)
-          } else if (event.key === Qt.Key_Right) {
-            root.navigate("right")
-          } else if (event.key === Qt.Key_Left) {
-            root.navigate("left")
-          } else if (event.key === Qt.Key_Down) {
-            root.navigate("down")
-          } else if (event.key === Qt.Key_Up) {
-            root.navigate("up")
-          } else if (event.key === Qt.Key_1) {
-            root.setMode("icons")
-          } else if (event.key === Qt.Key_2) {
-            root.setMode("flip")
-          } else if (event.key === Qt.Key_3) {
-            root.setMode("grid")
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
-            root.accept()
-          } else {
-            return
-          }
-          event.accepted = true
-        }
-
-        Keys.onReleased: event => {
-          root.sawKeyEvent = true
-          const superReleased = event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R
-          const altReleased = event.key === Qt.Key_Alt
-          const modifierReleased = root.releaseModifier === "alt" ? altReleased : root.releaseModifier === "super" && superReleased
-          if (root.releaseToActivate && modifierReleased)
-            root.accept()
-          event.accepted = true
-        }
-
-        Text {
-          id: heading
-          anchors.top: parent.top
-          anchors.topMargin: Style.space(18)
-          anchors.horizontalCenter: parent.horizontalCenter
-          text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
-          color: Color.menu.text
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-        }
-
-        Loader {
-          id: viewLoader
-
-          anchors.centerIn: parent
-          width: item ? item.implicitWidth : 0
-          height: item ? item.implicitHeight : 0
-          sourceComponent: root.mode === "grid" ? gridViewComponent : root.mode === "flip" ? flipViewComponent : iconsViewComponent
-        }
-
-        Component {
-          id: iconsViewComponent
-
-          IconsView {
-            maximumWidth: panel.width - Style.space(96)
-            windows: root.entries
-            selectedIndex: root.selectedIndex
-            hoverArmed: root.hoverArmed
-            onSelectRequested: index => root.select(index)
-            onActivateRequested: index => {
-              root.select(index)
-              root.accept()
-            }
-          }
-        }
-
-        Component {
-          id: gridViewComponent
-
-          GridView {
-            maximumWidth: panel.width - Style.space(96)
-            maximumHeight: panel.height - Style.space(190)
-            windows: root.entries
-            selectedIndex: root.selectedIndex
-            hoverArmed: root.hoverArmed
-            onSelectRequested: index => root.select(index)
-            onActivateRequested: index => {
-              root.select(index)
-              root.accept()
-            }
-          }
-        }
-
-        Component {
-          id: flipViewComponent
-
-          FlipView {
-            maximumWidth: panel.width - Style.space(96)
-            maximumHeight: panel.height - Style.space(190)
-            windows: root.entries
-            selectedIndex: root.selectedIndex
-            hoverArmed: root.hoverArmed
-            onSelectRequested: index => root.select(index)
-            onActivateRequested: index => {
-              root.select(index)
-              root.accept()
-            }
-          }
-        }
-
-        ModePicker {
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: Style.space(39)
-          anchors.horizontalCenter: parent.horizontalCenter
-          currentMode: root.mode
-          onModeRequested: mode => root.setMode(mode)
-        }
-
-        Text {
-          anchors.bottom: parent.bottom
-          anchors.bottomMargin: Style.space(16)
-          anchors.horizontalCenter: parent.horizontalCenter
-          width: Math.min(parent.width - Style.space(48), Style.space(620))
-          text: root.entries.length > 0 ? root.entries[root.selectedIndex].title : ""
-          textFormat: Text.PlainText
-          color: Color.menu.text
-          opacity: 0.72
-          elide: Text.ElideRight
-          horizontalAlignment: Text.AlignHCenter
-          font.family: Style.font.menuFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
-
-      Rectangle {
-        id: handoffCover
-
-        anchors.fill: parent
-        z: root.activationCommitInProgress && root.handoffNeedsCover ? 1000 : -1000
-        color: Color.menu.background
-        clip: true
-
-        ScreencopyView {
-          id: outgoingCapture
-
-          readonly property var captureWindow: root.windows.length > 0 ? root.windows[0] : null
-          readonly property real coverScale: sourceSize.width > 0 && sourceSize.height > 0 ? Math.max(handoffCover.width / sourceSize.width, handoffCover.height / sourceSize.height) : 1
-
-          anchors.centerIn: parent
-          width: sourceSize.width > 0 ? sourceSize.width * coverScale : handoffCover.width
-          height: sourceSize.height > 0 ? sourceSize.height * coverScale : handoffCover.height
-          captureSource: captureWindow ? captureWindow.wayland : null
-          constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
-          paintCursor: false
-          live: false
-        }
-
-        ShaderEffectSource {
-          anchors.centerIn: parent
-          width: outgoingCapture.width
-          height: outgoingCapture.height
-          sourceItem: outgoingCapture
-          hideSource: true
-          live: !root.activationCommitInProgress
-        }
-
-        ScreencopyView {
-          id: targetReadyProbe
-
-          anchors.fill: parent
-          captureSource: root.pendingWindow ? root.pendingWindow.wayland : null
-          constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
-          paintCursor: false
-          live: true
-          opacity: 0
-          onHasContentChanged: root.observeActivationTargetSurface(sourceSize.width, sourceSize.height)
-          onSourceSizeChanged: root.observeActivationTargetSurface(sourceSize.width, sourceSize.height)
-        }
+        color: "transparent"
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.namespace: "omarchy-window-switcher"
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
 
         Timer {
-          interval: 32
+          id: modifierPollTimer
+          interval: 150
           repeat: true
-          running: root.activationCommitInProgress && root.handoffNeedsCover
-          onTriggered: root.observeActivationTargetSurface(targetReadyProbe.sourceSize.width, targetReadyProbe.sourceSize.height)
+          // Keep the fallback alive after repeated keys too: layer focus changes
+          // can lose the final modifier-release event on multi-monitor setups.
+          running: root.opened && root.releaseToActivate
+          onTriggered: {
+            if (!modifierCheck.running)
+              modifierCheck.running = true
+          }
+        }
+
+        Process {
+          id: modifierCheck
+          command: ["hyprctl", "eval", root.releaseModifierExpression()]
+          stdout: StdioCollector {
+            onStreamFinished: root.observeModifierState(text)
+          }
+        }
+
+        Rectangle {
+          id: switcherScrim
+
+          anchors.fill: parent
+          color: Color.menu.scrim
+
+          TapHandler {
+            onTapped: root.cancel()
+          }
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          acceptedButtons: Qt.NoButton
+          hoverEnabled: true
+          onPositionChanged: mouse => root.pointerMoved(mouse.x, mouse.y)
+        }
+
+        Rectangle {
+          id: switcherCard
+
+          anchors.centerIn: parent
+          width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
+          height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
+          radius: Style.cornerRadius * 2
+          color: Color.menu.background
+          border.width: 1
+          border.color: Color.menu.border
+          focus: true
+
+          Keys.onPressed: event => {
+            root.traceInput("qml-switcher-key", event.key)
+            if (event.key === Qt.Key_Escape) {
+              if (root.switcherInputSource !== "native")
+                root.cancel()
+            } else if (event.key === Qt.Key_Q) {
+              root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
+            } else if (event.key === Qt.Key_Tab) {
+              root.cycle(event.modifiers & Qt.ShiftModifier ? -1 : 1)
+            } else if (event.key === Qt.Key_Backtab) {
+              root.cycle(-1)
+            } else if (event.key === Qt.Key_Right) {
+              root.navigate("right")
+            } else if (event.key === Qt.Key_Left) {
+              root.navigate("left")
+            } else if (event.key === Qt.Key_Down) {
+              root.navigate("down")
+            } else if (event.key === Qt.Key_Up) {
+              root.navigate("up")
+            } else if (event.key === Qt.Key_1) {
+              root.setMode("icons")
+            } else if (event.key === Qt.Key_2) {
+              root.setMode("flip")
+            } else if (event.key === Qt.Key_3) {
+              root.setMode("grid")
+            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) {
+              root.accept()
+            } else {
+              return
+            }
+            event.accepted = true
+          }
+
+          Keys.onReleased: event => {
+            root.traceInput("qml-release", event.key)
+            const superReleased = event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L || event.key === Qt.Key_Super_R
+            const altReleased = event.key === Qt.Key_Alt
+            const modifierReleased = root.releaseModifier === "alt" ? altReleased : root.releaseModifier === "super" && superReleased
+            if (root.releaseToActivate && modifierReleased && root.switcherInputSource !== "native")
+              root.accept()
+            event.accepted = true
+          }
+
+          Text {
+            id: heading
+            anchors.top: parent.top
+            anchors.topMargin: Style.space(18)
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
+            color: Color.menu.text
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Loader {
+            id: viewLoader
+
+            anchors.centerIn: parent
+            width: item ? item.implicitWidth : 0
+            height: item ? item.implicitHeight : 0
+            sourceComponent: root.mode === "grid" ? gridViewComponent : root.mode === "flip" ? flipViewComponent : iconsViewComponent
+          }
+
+          Component {
+            id: iconsViewComponent
+
+            IconsView {
+              maximumWidth: panel.width - Style.space(96)
+              windows: root.entries
+              selectedIndex: root.selectedIndex
+              hoverArmed: root.hoverArmed
+              onSelectRequested: index => root.select(index)
+              onActivateRequested: index => {
+                root.select(index)
+                root.accept()
+              }
+            }
+          }
+
+          Component {
+            id: gridViewComponent
+
+            GridView {
+              maximumWidth: panel.width - Style.space(96)
+              maximumHeight: panel.height - Style.space(190)
+              windows: root.entries
+              selectedIndex: root.selectedIndex
+              hoverArmed: root.hoverArmed
+              onSelectRequested: index => root.select(index)
+              onActivateRequested: index => {
+                root.select(index)
+                root.accept()
+              }
+            }
+          }
+
+          Component {
+            id: flipViewComponent
+
+            FlipView {
+              maximumWidth: panel.width - Style.space(96)
+              maximumHeight: panel.height - Style.space(190)
+              windows: root.entries
+              selectedIndex: root.selectedIndex
+              hoverArmed: root.hoverArmed
+              onSelectRequested: index => root.select(index)
+              onActivateRequested: index => {
+                root.select(index)
+                root.accept()
+              }
+            }
+          }
+
+          ModePicker {
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(39)
+            anchors.horizontalCenter: parent.horizontalCenter
+            currentMode: root.mode
+            onModeRequested: mode => root.setMode(mode)
+          }
+
+          Text {
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: Style.space(16)
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width - Style.space(48), Style.space(620))
+            text: root.entries.length > 0 ? root.entries[root.selectedIndex].title : ""
+            textFormat: Text.PlainText
+            color: Color.menu.text
+            opacity: 0.72
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
+            font.family: Style.font.menuFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
+      }
+
+      PanelWindow {
+        // The picker stays on the primary display, but a resize cover belongs
+        // to the outgoing window's display. This window never takes input.
+        screen: root.screenForMonitorName(root.windows.length > 0 ? root.windows[0].monitorName : "") || root.targetScreen
+        anchors {
+          top: true
+          bottom: true
+          left: true
+          right: true
+        }
+        exclusionMode: ExclusionMode.Ignore
+        color: "transparent"
+        mask: Region {}
+        WlrLayershell.namespace: "omarchy-orbit-handoff"
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+        Rectangle {
+          id: handoffCover
+
+          anchors.fill: parent
+          z: 1000
+          opacity: root.activationCommitInProgress && root.handoffNeedsCover ? 1 : 0
+          color: Color.menu.background
+          clip: true
+
+          ScreencopyView {
+            id: outgoingCapture
+
+            readonly property var captureWindow: root.windows.length > 0 ? root.windows[0] : null
+            readonly property real coverScale: sourceSize.width > 0 && sourceSize.height > 0 ? Math.max(handoffCover.width / sourceSize.width, handoffCover.height / sourceSize.height) : 1
+
+            anchors.centerIn: parent
+            width: sourceSize.width > 0 ? sourceSize.width * coverScale : handoffCover.width
+            height: sourceSize.height > 0 ? sourceSize.height * coverScale : handoffCover.height
+            captureSource: captureWindow ? captureWindow.wayland : null
+            constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
+            paintCursor: false
+            live: false
+          }
+
+          ShaderEffectSource {
+            anchors.centerIn: parent
+            width: outgoingCapture.width
+            height: outgoingCapture.height
+            sourceItem: outgoingCapture
+            hideSource: true
+            live: !root.activationCommitInProgress
+          }
         }
       }
     }

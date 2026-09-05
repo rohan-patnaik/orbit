@@ -7,14 +7,29 @@ Grid {
   property var layouts: []
   property int selectedLayout: 0
   property int selectedSlot: 0
+  property bool interactive: true
 
   signal slotRequested(int layoutIndex, int slotIndex)
   signal slotHovered(int layoutIndex, int slotIndex)
 
-  columns: 3
+  columns: 4
   spacing: Style.space(12)
 
+  function hitTest(x, y) {
+    for (let index = 0; index < layoutRepeater.count; index++) {
+      const tile = layoutRepeater.itemAt(index)
+      const slot = tile ? tile.slotAt(root, x, y) : -1
+      if (slot >= 0)
+        return {
+          layout: index,
+          slot: slot
+        }
+    }
+    return null
+  }
+
   Repeater {
+    id: layoutRepeater
     model: root.layouts
 
     Rectangle {
@@ -25,8 +40,18 @@ Grid {
 
       readonly property var layoutData: modelData
 
-      width: Style.space(154)
-      height: Style.space(112)
+      function slotAt(item, x, y) {
+        for (let index = 0; index < slotRepeater.count; index++) {
+          const slot = slotRepeater.itemAt(index)
+          const point = slot.mapFromItem(item, x, y)
+          if (slot.contains(point))
+            return index
+        }
+        return -1
+      }
+
+      width: Style.space(136)
+      height: Style.space(108)
       radius: Style.cornerRadius
       color: Color.background
       border.width: root.selectedLayout === index ? 2 : 1
@@ -41,9 +66,10 @@ Grid {
           right: parent.right
           margins: Style.space(10)
         }
-        height: Style.space(72)
+        height: Style.space(68)
 
         Repeater {
+          id: slotRepeater
           model: layoutTile.layoutData.slots
 
           Rectangle {
@@ -65,6 +91,7 @@ Grid {
 
             HoverHandler {
               id: hoverHandler
+              enabled: root.interactive
               onHoveredChanged: {
                 if (hovered)
                   root.slotHovered(layoutTile.index, slotTile.index)
@@ -72,6 +99,7 @@ Grid {
             }
 
             TapHandler {
+              enabled: root.interactive
               onTapped: root.slotRequested(layoutTile.index, slotTile.index)
             }
           }

@@ -4,7 +4,7 @@ local orbit_plugin_id = "io.github.rohan-patnaik.window-switcher"
 
 local function orbit_window_modes()
   local modes = {
-    default_mode = "maximized",
+    default_mode = "tiled",
     tiled = true,
     floating = true,
     maximized = true,
@@ -16,7 +16,7 @@ local function orbit_window_modes()
   local query = [[
     ([.plugins[]? | select(.id == $id) | .windowModes][0] // {}) as $m
     | [
-        ($m.defaultMode // "maximized"),
+        ($m.defaultMode // "tiled"),
         (if $m | has("tiled") then $m.tiled else true end),
         (if $m | has("floating") then $m.floating else true end),
         (if $m | has("maximized") then $m.maximized else true end),
@@ -58,14 +58,24 @@ end
 
 local window_modes = orbit_window_modes()
 
--- Apply the chosen default only when a new window is created. Applications may
--- still request their own fullscreen state (for example, a fullscreen video).
-if window_modes.default_mode == "tiled" then
-  o.window(".*", { tile = true })
-elseif window_modes.default_mode == "floating" then
-  o.window(".*", { float = true })
-else
-  o.window(".*", { maximize = true })
+local function orbit_cycle(direction)
+  -- Look up on every invocation so loading/unloading the optional native
+  -- bridge does not strand the binding. The native path keeps presses and
+  -- Alt releases in one ordered event stream, including rapid gestures.
+  local bridge = hl.plugin and hl.plugin.orbit
+  if bridge and bridge[direction] then
+    bridge[direction]()
+  else
+    hl.dispatch(hl.dsp.global("omarchy-window-switcher:" .. direction))
+  end
+end
+
+-- Do not override app/Omarchy rules for dialogs, PiP, transient utility windows
+-- or the user's background-launch rules. Tiled is the unmodified default.
+if window_modes.default_mode == "floating" then
+  o.window({ class = ".*", float = false }, { float = true })
+elseif window_modes.default_mode == "maximized" then
+  o.window({ class = ".*", float = false }, { maximize = true })
 end
 
 hl.unbind("ALT + TAB")
@@ -74,14 +84,14 @@ hl.unbind("ALT + SHIFT + TAB")
 o.bind(
   "ALT + TAB",
   "Orbit next window",
-  hl.dsp.global("omarchy-window-switcher:next"),
+  function() orbit_cycle("next") end,
   { repeating = true }
 )
 
 o.bind(
   "ALT + SHIFT + TAB",
   "Orbit previous window",
-  hl.dsp.global("omarchy-window-switcher:previous"),
+  function() orbit_cycle("previous") end,
   { repeating = true }
 )
 
@@ -98,6 +108,10 @@ hl.unbind("SUPER + ALT + F")
 
 if window_modes.tiled and window_modes.floating then
   o.bind("SUPER + T", "Toggle window floating/tiling", hl.dsp.window.float({ action = "toggle" }))
+elseif window_modes.tiled then
+  o.bind("SUPER + T", "Tile window", hl.dsp.window.float({ action = "unset" }))
+elseif window_modes.floating then
+  o.bind("SUPER + T", "Float window", hl.dsp.window.float({ action = "set" }))
 end
 if window_modes.fullscreen then
   o.bind("SUPER + F", "Full screen", hl.dsp.window.fullscreen({ mode = "fullscreen" }))
@@ -106,7 +120,7 @@ if window_modes.tiled_fullscreen then
   o.bind("SUPER + CTRL + F", "Tiled full screen", "omarchy-hyprland-window-tiled-fullscreen-toggle")
 end
 if window_modes.maximized then
-  o.bind("SUPER + ALT + F", "Full width", hl.dsp.window.fullscreen({ mode = "maximized" }))
+  o.bind("SUPER + ALT + F", "Maximized", hl.dsp.window.fullscreen({ mode = "maximized" }))
 end
 
 o.bind("SUPER + Z", "Orbit snap layouts", hl.dsp.global("omarchy-window-switcher:snap"))

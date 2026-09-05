@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import "../SwitcherLogic.js" as Logic
 
 Item {
   id: root
@@ -8,18 +9,38 @@ Item {
   property string fallbackText: "?"
   property bool showBackplate: false
 
-  readonly property bool hasIcon: root.iconSource.length > 0
-  readonly property bool canSampleIcon: root.iconSource.startsWith("file:") || root.iconSource.startsWith("/")
-  readonly property color sampledColor: quantizer.colors.length > 0 ? quantizer.colors[0] : "#808080"
-  readonly property real sampledLuminance: root.sampledColor.r * 0.2126 + root.sampledColor.g * 0.7152 + root.sampledColor.b * 0.0722
+  readonly property bool hasIcon: root.iconSource.length > 0 && artwork.status !== Image.Error
+  property real sampledLuminance: 0.5
   readonly property color contrastBackplate: root.sampledLuminance < 0.5 ? "#f5f5f5" : "#171717"
 
-  ColorQuantizer {
-    id: quantizer
-
-    source: root.showBackplate && root.hasIcon && root.canSampleIcon ? root.iconSource : ""
-    depth: 0
-    rescaleSize: 32
+  // ColorQuantizer only opens local files; themed icons use image://icon/.
+  // Canvas uses Qt's image loader, including that provider, entirely in memory.
+  Canvas {
+    id: sampler
+    width: 32
+    height: 32
+    opacity: 0
+    visible: root.showBackplate && root.hasIcon
+    property string sampleSource: visible ? root.iconSource : ""
+    property string previousSource: ""
+    onSampleSourceChanged: {
+      if (previousSource)
+        unloadImage(previousSource)
+      previousSource = sampleSource
+      root.sampledLuminance = 0.5
+      if (sampleSource)
+        loadImage(sampleSource)
+      requestPaint()
+    }
+    onImageLoaded: requestPaint()
+    onPaint: {
+      if (!sampleSource || !isImageLoaded(sampleSource))
+        return
+      const context = getContext("2d")
+      context.clearRect(0, 0, width, height)
+      context.drawImage(sampleSource, 0, 0, width, height)
+      root.sampledLuminance = Logic.iconLuminance(context.getImageData(0, 0, width, height).data)
+    }
   }
 
   Rectangle {
@@ -32,6 +53,7 @@ Item {
   }
 
   Image {
+    id: artwork
     anchors.centerIn: parent
     width: root.showBackplate ? parent.width * 0.76 : parent.width
     height: root.showBackplate ? parent.height * 0.76 : parent.height

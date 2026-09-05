@@ -26,9 +26,15 @@ Column {
     },
     {
       key: "maximized",
-      label: "Full width",
+      label: "Maximized (work area)",
       shortcut: "Super + Alt + F",
       canDefault: true
+    },
+    {
+      key: "maximizeOnSwitch",
+      label: "Maximize on switch",
+      shortcut: "Normal Alt + Tab targets",
+      canDefault: false
     },
     {
       key: "fullscreen",
@@ -48,7 +54,7 @@ Column {
 
   Text {
     width: parent.width
-    text: "Choose the launch default and which Omarchy mode shortcuts remain available. App-requested video and game fullscreen stays allowed."
+    text: "Choose the launch default, Alt+Tab behavior, and which Omarchy mode shortcuts remain available. App-requested video and game fullscreen stays allowed."
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
     color: Color.menu.text

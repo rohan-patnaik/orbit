@@ -13,7 +13,7 @@ function focusHistoryId(value) {
 
 function fullscreenState(value) {
   var number = Number(value)
-  return Number.isInteger(number) && number >= 0 && number <= 3 ? number : 0
+  return Number.isInteger(number) && number >= 0 && number <= 3 ? Math.min(2, number) : 0
 }
 
 function resumableFullscreenState(internalState, clientState) {
@@ -25,10 +25,13 @@ function fullscreenHandoffPlan(sourceInternalState, targetInternalState, targetD
   var source = fullscreenState(sourceInternalState)
   var currentTarget = fullscreenState(targetInternalState)
   var desiredTarget = fullscreenState(targetDesiredState)
-  var restoreTargetBeforeFocus = source > 0 && source === desiredTarget
+  // Hyprland allows one covering fullscreen window per workspace. Promoting
+  // the target first implicitly clears BOTH states of the old covering app.
+  // Explicitly release only its internal state before restoring the target.
+  var restoreTargetBeforeFocus = desiredTarget > 0
   return {
     restoreTargetBeforeFocus: restoreTargetBeforeFocus,
-    releaseSource: source > 0 && !restoreTargetBeforeFocus,
+    releaseSource: source > 0,
     targetResizes: currentTarget !== desiredTarget
   }
 }
@@ -64,7 +67,10 @@ function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
   if (!ipc || ipc.mapped === false) return false
   var normalizedScope = normalizeScope(scope)
   var workspace = Number(workspaceId)
-  if (normalizedScope === "all") return workspace > 0
+  if (normalizedScope === "all") {
+    var name = String(ipc.workspace ? ipc.workspace.name || "" : "")
+    return workspace > 0 || (name !== "" && !name.startsWith("special:"))
+  }
 
   if (normalizedScope === "monitor") {
     if (workspace === Number(activeWorkspaceId)) return true
@@ -182,6 +188,17 @@ function appMonogram(value) {
   return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase()
 }
 
+function iconLuminance(pixels) {
+  var weighted = 0
+  var alpha = 0
+  for (var i = 0; i + 3 < pixels.length; i += 4) {
+    var weight = pixels[i + 3] / 255
+    weighted += (pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722) / 255 * weight
+    alpha += weight
+  }
+  return alpha > 0 ? weighted / alpha : 0.5
+}
+
 function initialSelection(rows, direction) {
   if (rows.length <= 1) return 0
   return Number(direction) < 0 ? rows.length - 1 : 1
@@ -296,11 +313,6 @@ function snapLayouts() {
       { x: 0, y: 0, width: 2 / 3, height: 1 },
       { x: 2 / 3, y: 0, width: 1 / 3, height: 1 }
     ] },
-    { id: "main-left", label: "Main and stack", slots: [
-      { x: 0, y: 0, width: 0.5, height: 1 },
-      { x: 0.5, y: 0, width: 0.5, height: 0.5 },
-      { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
-    ] },
     { id: "thirds", label: "Thirds", slots: [
       { x: 0, y: 0, width: 1 / 3, height: 1 },
       { x: 1 / 3, y: 0, width: 1 / 3, height: 1 },
@@ -316,15 +328,76 @@ function snapLayouts() {
       { x: 0.5, y: 0, width: 0.5, height: 0.5 },
       { x: 0, y: 0.5, width: 0.5, height: 0.5 },
       { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
+    ] },
+    { id: "maximized", label: "Maximized", action: "maximized", slots: [
+      { x: 0, y: 0, width: 1, height: 1 }
+    ] },
+    { id: "fullscreen", label: "Fullscreen", action: "fullscreen", slots: [
+      { x: 0, y: 0, width: 1, height: 1 }
     ] }
   ]
+}
+
+function availableSnapLayouts(modes) {
+  var policy = normalizedWindowModes(modes)
+  return snapLayouts().filter(function(layout) {
+    return layout.action ? policy[layout.action] === true : policy.floating === true
+  })
+}
+
+function monitorSize(monitor) {
+  var m = monitor || {}
+  var scale = Math.max(0.01, Number(m.scale) || 1)
+  var rotated = Number(m.transform || 0) % 2 === 1
+  return {
+    width: Number(m.logicalWidth) || (Number(rotated ? m.height : m.width) || 1) / scale,
+    height: Number(m.logicalHeight) || (Number(rotated ? m.width : m.height) || 1) / scale
+  }
+}
+
+function dragEdge(event) {
+  if (!event || !event.monitor) return ""
+  var m = event.monitor
+  var size = monitorSize(m)
+  var x = Number(event.x) - Number(m.x)
+  var y = Number(event.y) - Number(m.y)
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= size.width || y >= size.height) return ""
+  var left = x <= 72
+  var right = x >= size.width - 72
+  if (y <= 72 && (left || right)) return left ? "top-left" : "top-right"
+  if (y >= size.height - 72 && (left || right)) return left ? "bottom-left" : "bottom-right"
+  return y <= 32 ? "top" : ""
+}
+
+function dragPickerGeometry(monitor, anchor, width, height) {
+  var size = monitorSize(monitor)
+  var w = Math.min(width, size.width - 24)
+  var h = Math.min(height, size.height - 24)
+  return {
+    x: anchor.endsWith("left") ? 12 : anchor.endsWith("right") ? size.width - w - 12 : (size.width - w) / 2,
+    y: anchor.startsWith("bottom") ? size.height - h - 12 : 12,
+    width: w, height: h
+  }
+}
+
+function dragPresentation(previous, event, bounds) {
+  var empty = { visible: false, session: Number(event ? event.session : 0), monitorId: -1, anchor: "top" }
+  if (!event || event.protocol !== 1 || event.phase !== "move" || !event.window || !safeAddress(event.window.address) || !event.monitor)
+    return empty
+  var edge = dragEdge(event)
+  var same = previous && previous.visible && previous.session === event.session && previous.monitorId === event.monitor.id
+  var x = Number(event.x) - Number(event.monitor.x)
+  var y = Number(event.y) - Number(event.monitor.y)
+  var inside = same && bounds && x >= bounds.x - 24 && y >= bounds.y - 24
+    && x <= bounds.x + bounds.width + 24 && y <= bounds.y + bounds.height + 24
+  return { visible: Boolean(edge || inside), session: event.session, monitorId: event.monitor.id,
+    anchor: same && inside ? previous.anchor : edge || "top" }
 }
 
 function snapGeometry(slot, monitor, outerGap, innerGap) {
   var safeSlot = slot || { x: 0, y: 0, width: 1, height: 1 }
   var safeMonitor = monitor || {}
-  var scale = Number(safeMonitor.scale)
-  if (!Number.isFinite(scale) || scale <= 0) scale = 1
+  var size = monitorSize(safeMonitor)
   var reserved = Array.isArray(safeMonitor.reserved) ? safeMonitor.reserved : []
   var leftReserved = Number(reserved[0]) || 0
   var topReserved = Number(reserved[1]) || 0
@@ -334,8 +407,8 @@ function snapGeometry(slot, monitor, outerGap, innerGap) {
   var inner = Math.max(0, Number(innerGap) || 0)
   var areaX = (Number(safeMonitor.x) || 0) + leftReserved + outer
   var areaY = (Number(safeMonitor.y) || 0) + topReserved + outer
-  var areaWidth = Math.max(1, (Number(safeMonitor.width) || 1) / scale - leftReserved - rightReserved - outer * 2)
-  var areaHeight = Math.max(1, (Number(safeMonitor.height) || 1) / scale - topReserved - bottomReserved - outer * 2)
+  var areaWidth = Math.max(1, size.width - leftReserved - rightReserved - outer * 2)
+  var areaHeight = Math.max(1, size.height - topReserved - bottomReserved - outer * 2)
   var startX = areaX + Number(safeSlot.x || 0) * areaWidth
   var startY = areaY + Number(safeSlot.y || 0) * areaHeight
   var endX = areaX + (Number(safeSlot.x || 0) + Number(safeSlot.width || 1)) * areaWidth
@@ -354,7 +427,8 @@ function snapGeometry(slot, monitor, outerGap, innerGap) {
 
 function defaultWindowModes() {
   return {
-    defaultMode: "maximized",
+    defaultMode: "tiled",
+    maximizeOnSwitch: false,
     tiled: true,
     floating: true,
     maximized: true,
@@ -368,6 +442,7 @@ function normalizedWindowModes(value) {
   var source = value && typeof value === "object" ? value : {}
   var result = {
     defaultMode: String(source.defaultMode || defaults.defaultMode),
+    maximizeOnSwitch: source.maximizeOnSwitch === undefined ? defaults.maximizeOnSwitch : source.maximizeOnSwitch === true,
     tiled: source.tiled === undefined ? defaults.tiled : source.tiled === true,
     floating: source.floating === undefined ? defaults.floating : source.floating === true,
     maximized: source.maximized === undefined ? defaults.maximized : source.maximized === true,
@@ -376,10 +451,57 @@ function normalizedWindowModes(value) {
   }
   if (!result.tiled && !result.floating && !result.maximized)
     result.maximized = true
+  if (!result.maximized) result.maximizeOnSwitch = false
   if ((result.defaultMode !== "tiled" && result.defaultMode !== "floating" && result.defaultMode !== "maximized") || !result[result.defaultMode]) {
     result.defaultMode = result.maximized ? "maximized" : result.tiled ? "tiled" : "floating"
   }
   return result
+}
+
+function desiredWindowState(window, remembered, modes) {
+  var internal = fullscreenState(window.fullscreenState)
+  var client = fullscreenState(window.clientFullscreenState)
+  // An app's live media/fullscreen request outranks the personal launch policy.
+  if (client === 2 || internal === 2) return 2
+  if (internal > 0) return internal
+  if (modes.maximized && modes.maximizeOnSwitch && !window.pinned && !window.floating) return 1
+  // A live client exit invalidates a remembered fullscreen snapshot.
+  return client > 0 && remembered ? resumableFullscreenState(remembered.internal, client) : client
+}
+
+function mediaExitRestoreScript(value) {
+  var address = safeAddress(value)
+  if (!address) return ""
+  // Resolve and recheck in one compositor transaction: focus, geometry, or the
+  // app's intent may have changed while the fullscreen event was in transit.
+  return 'local w = hl.get_window("address:' + address + '"); local a = hl.get_active_window(); '
+    + 'if w and a and w.address == a.address and w.mapped and not w.floating and not w.pinned '
+    + 'and w.fullscreen == 0 and w.fullscreen_client == 0 then '
+    + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=1,client=1,action="set",window=w})) end'
+}
+
+function activationScript(sourceValue, targetValue, desiredState, restoreFirst, groupIndexValue, companions) {
+  var target = safeAddress(targetValue)
+  if (!target) return ""
+  var source = safeAddress(sourceValue)
+  var desired = fullscreenState(desiredState)
+  var script = 'local t = hl.get_window("address:' + target + '"); if not t or not t.mapped then return end; '
+    + 'local function state(w, mode) if w and w.mapped and w.fullscreen ~= mode then '
+    + 'local client = w.fullscreen_client; if mode == 1 and client == 0 then client = 1 end; '
+    + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=mode,client=client,action="set",window=w})) end end; '
+  if (source && source !== target)
+    script += 'local s = hl.get_window("address:' + source + '"); if s and s.workspace and t.workspace and s.workspace.id == t.workspace.id then state(s,0) end; '
+  if (desired > 0 && restoreFirst) script += 'state(t,' + desired + '); '
+  for (var i = 0; companions && i < companions.length; i++) {
+    var member = safeAddress(companions[i])
+    if (member && member !== target)
+      script += 'local g = hl.get_window("address:' + member + '"); if g and g.mapped then hl.dispatch(hl.dsp.window.alter_zorder({mode="top",window=g})) end; '
+  }
+  var group = Math.max(0, Math.floor(Number(groupIndexValue) || 0))
+  if (group > 0) script += 'hl.dispatch(hl.dsp.group.active({window=t,index=' + group + '})); '
+  script += 'hl.dispatch(hl.dsp.focus({window=t})); '
+  if (desired > 0 && !restoreFirst) script += 'state(t,' + desired + '); '
+  return script + 'hl.dispatch(hl.dsp.window.alter_zorder({mode="top",window=t}))'
 }
 
 function windowModesFromPluginEntries(entries, pluginId) {

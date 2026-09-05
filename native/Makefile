@@ -13,7 +13,7 @@ SOURCE := orbit_drag.cpp
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCE)
+$(TARGET): $(SOURCE) DragTracker.hpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(INCLUDES) $< -o $@
 
 clean:

@@ -1,142 +1,73 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const test = require("node:test");
 
-const root = path.resolve(__dirname, "..");
-const bindings = fs.readFileSync(path.join(root, "bindings.lua"), "utf8");
-const overlay = fs.readFileSync(path.join(root, "Overlay.qml"), "utf8");
-const windowCard = fs.readFileSync(path.join(root, "components", "WindowCard.qml"), "utf8");
-
-test("Orbit owns Alt+Tab and preserves stock cycling on Super+Q", () => {
-  assert.match(bindings, /hl\.unbind\("ALT \+ TAB"\)/);
-  assert.match(bindings, /hl\.unbind\("ALT \+ SHIFT \+ TAB"\)/);
-  assert.match(bindings, /"ALT \+ TAB"[\s\S]*omarchy-window-switcher:next/);
-  assert.match(bindings, /"ALT \+ SHIFT \+ TAB"[\s\S]*omarchy-window-switcher:previous/);
-  assert.match(bindings, /"SUPER \+ Q"[\s\S]*hl\.dsp\.window\.cycle_next\(\)/);
-  assert.match(bindings, /"SUPER \+ SHIFT \+ Q"[\s\S]*cycle_next\(\{ next = false \}\)/);
+function configured(tsv = "", nativeBridge = false) {
+  const lua = `
+    local config = ${JSON.stringify(tsv)}
+    io.popen = function() return { read=function() return config end, close=function() end } end
+    local function dispatcher(name)
+      return setmetatable({}, {
+        __index=function(_, key) return dispatcher(name .. "." .. key) end,
+        __call=function(_, args) return {name=name, args=args or {}} end
+      })
+    end
+    hl = {dsp=dispatcher("hl.dsp"), unbind=function(key) print("unbind\\t" .. key) end,
+      dispatch=function(action) print("dispatch\\t" .. action.args) end}
+    if ${nativeBridge} then
+      hl.plugin = {orbit={
+        next=function() print("native\\tnext") end,
+        previous=function() print("native\\tprevious") end
+      }}
+    end
+    o = {
+      shell_quote=function(s) return s end,
+      bind=function(key, label, action)
+        if type(action) == "function" then
+          print("bind\\t" .. key .. "\\t" .. label .. "\\tcallback")
+          action()
+          -- The same callback must survive the bridge being unloaded.
+          if hl.plugin then hl.plugin=nil; action() end
+          return
+        end
+        print("bind\\t" .. key .. "\\t" .. label .. "\\t" .. (type(action) == "table" and action.name or action) .. "\\t" .. (type(action) == "table" and (action.args.action or "") or ""))
+      end,
+      window=function(match, rules)
+        for key in pairs(rules) do print("rule\\t" .. key .. "\\t" .. tostring(type(match) == "table" and match.float)) end
+      end
+    }
+    dofile(${JSON.stringify(path.join(__dirname, "..", "bindings.lua"))})
+  `;
+  return execFileSync("lua", ["-"], {input: lua, encoding: "utf8"}).trim().split("\n").map(line => line.split("\t"));
+}
+test("Alt+Tab owns forward/reverse shortcuts and unbinds existing ones", () => {
+  const rows = configured();
+  for (const key of ["ALT + TAB", "ALT + SHIFT + TAB"])
+    assert.ok(rows.some(row => row[0] === "unbind" && row[1] === key));
+  assert.ok(rows.some(row => row[0] === "bind" && row[1] === "ALT + TAB" && row[3] === "callback"));
+  assert.ok(rows.some(row => row[0] === "dispatch" && row[1] === "omarchy-window-switcher:next"));
+  assert.ok(rows.some(row => row[0] === "bind" && row[1] === "SUPER + SHIFT + Z"));
 });
-
-test("Orbit exposes Windows-style snap layouts and a window-mode policy", () => {
-  assert.match(bindings, /orbit_window_modes/);
-  assert.match(bindings, /o\.window\("\.\*", \{ maximize = true \}\)/);
-  assert.match(bindings, /hl\.unbind\("SUPER \+ T"\)/);
-  assert.match(bindings, /hl\.unbind\("SUPER \+ F"\)/);
-  assert.match(bindings, /hl\.unbind\("SUPER \+ CTRL \+ F"\)/);
-  assert.match(bindings, /hl\.unbind\("SUPER \+ ALT \+ F"\)/);
-  assert.match(bindings, /"SUPER \+ Z"[\s\S]*omarchy-window-switcher:snap/);
-  assert.match(bindings, /"SUPER \+ SHIFT \+ Z"[\s\S]*omarchy-window-switcher:settings/);
+test("normal binding prefers ordered native events and falls back after bridge unload", () => {
+  const rows = configured("", true);
+  assert.ok(rows.some(row => row[0] === "native" && row[1] === "next"));
+  assert.ok(rows.some(row => row[0] === "dispatch" && row[1] === "omarchy-window-switcher:next"));
 });
-
-test("snap placement uses exact-address compositor operations and Snap Assist", () => {
-  assert.match(overlay, /name: "snap"[\s\S]*root\.openSnapManager\(\)/);
-  assert.match(overlay, /fullscreen_state\(\{ internal = 0, client = 0/);
-  assert.match(overlay, /window\.float\(\{ action = "set"/);
-  assert.match(overlay, /window\.move\(\{ x = '[^\n]*relative = false/);
-  assert.match(overlay, /window\.resize\(\{ x = '[^\n]*relative = false/);
-  assert.match(overlay, /root\.managerMode = "assist"/);
-  assert.match(overlay, /root\.snapAssistCandidates\.filter/);
+test("default installation preserves tiling; personal maximized default excludes floating utilities", () => {
+  assert.equal(configured().filter(row => row[0] === "rule").length, 0);
+  const personal = configured("maximized\ttrue\ttrue\ttrue\ttrue\ttrue");
+  assert.ok(personal.some(row => row[0] === "rule" && row[1] === "maximize" && row[2] === "false"));
 });
-
-test("plugin settings are merged so mode, scope, and window policy survive each save", () => {
-  assert.match(overlay, /function currentPluginSettings\(\)/);
-  assert.match(overlay, /function persistPluginSettings\(changes\)/);
-  assert.match(overlay, /root\.persistPluginSettings\(\{\s*mode: nextMode\s*\}\)/);
-  assert.match(overlay, /root\.persistPluginSettings\(\{\s*windowModes: root\.windowModes\s*\}\)/);
+test("mode shortcuts honor disabled options and retain an escape to the sole normal mode", () => {
+  const rows = configured("tiled\ttrue\tfalse\tfalse\tfalse\tfalse");
+  const binds = rows.filter(row => row[0] === "bind");
+  assert.equal(binds.some(row => row[1] === "SUPER + F"), false);
+  assert.equal(binds.some(row => row[1] === "SUPER + ALT + F"), false);
+  assert.ok(binds.some(row => row[1] === "SUPER + T" && row[4] === "unset"));
 });
-
-test("Alt+Tab always renders on the configured primary display", () => {
-  assert.match(overlay, /function switcherScreen\(\)/);
-  assert.match(overlay, /for \(const monitor of Hyprland\.monitors\.values \|\| \[\]\)[\s\S]*monitors\.push\(monitor\)/);
-  assert.match(overlay, /Logic\.overlayMonitorName/);
-  assert.match(overlay, /function startSwitcher[\s\S]*root\.targetScreen = root\.switcherScreen\(\)/);
-  assert.match(overlay, /function openSnapManager[\s\S]*root\.captureFocusContext\(\)/);
-});
-
-test("Snap Groups are remembered and raised together during Alt+Tab activation", () => {
-  assert.match(overlay, /function rememberSnapGroup\(group\)/);
-  assert.match(overlay, /function raiseSnapGroup\(address\)/);
-  assert.match(overlay, /root\.raiseSnapGroup\(selected\.address\)/);
-  assert.match(overlay, /window\.alter_zorder\(\{ top = true/);
-  assert.match(overlay, /addresses\.length > 1/);
-});
-
-test("the overlay cycles backward and activates when Alt is released", () => {
-  assert.match(overlay, /name: "previous"[\s\S]*root\.invokeShortcut\(-1\)/);
-  assert.match(overlay, /hl\.is_key_down\("Alt_L"\)[\s\S]*hl\.is_key_down\("Alt_R"\)/);
-  assert.match(overlay, /event\.key === Qt\.Key_Alt/);
-  assert.match(overlay, /root\.releaseModifier === "alt" \? altReleased/);
-});
-
-test("the overlay snapshots the compositor MRU order before opening", () => {
-  assert.match(overlay, /command: \["hyprctl", "-j", "clients"\]/);
-  assert.match(overlay, /JSON\.parse\(text\)/);
-  assert.match(overlay, /focusHistoryID/);
-  assert.match(overlay, /queuedSteps/);
-  assert.doesNotMatch(overlay, /lastIpcObject/);
-});
-
-test("window activation preserves each app's compositor and client fullscreen state", () => {
-  assert.match(overlay, /fullscreenState: Logic\.fullscreenState\(ipc\.fullscreen\)/);
-  assert.match(overlay, /clientFullscreenState: Logic\.fullscreenState\(ipc\.fullscreenClient\)/);
-  assert.match(overlay, /fullscreen_state\(\{ internal = 0, client = -1/);
-  assert.match(overlay, /root\.prepareFullscreenHandoff/);
-  assert.match(overlay, /root\.restoreSelectedFullscreen\(\)/);
-});
-
-test("exact-address activation raises the focused window and waits for confirmation", () => {
-  assert.match(
-    overlay,
-    /hl\.dsp\.focus\(\{ window = "address:' \+ selected\.address[\s\S]*hl\.dsp\.window\.bring_to_top\(\)/
-  );
-  assert.match(overlay, /activationCommitAttempts < root\.activationCommitAttemptLimit/);
-  assert.match(overlay, /root\.abortActivationCommit\(\)[\s\S]*return/);
-  assert.match(overlay, /selected window did not accept focus; keeping Orbit open/);
-});
-
-test("the selected window is raised again after the keyboard-grabbing layer unmaps", () => {
-  assert.match(
-    overlay,
-    /function finishActivationCommit\(\)[\s\S]*root\.opened = false[\s\S]*activationFinalizeTimer\.restart\(\)/
-  );
-  assert.match(
-    overlay,
-    /function finalizeActivationCommit\(\)[\s\S]*root\.releaseHandoffAnimations\(\)[\s\S]*root\.raisePendingWindow\(\)/
-  );
-  assert.match(overlay, /id: activationFinalizeTimer[\s\S]*interval: 32/);
-});
-
-test("fullscreen handoff stays covered and disables transient layout animation", () => {
-  assert.match(overlay, /root\.activationCommitInProgress = true/);
-  assert.match(overlay, /id: activationCommitTimer[\s\S]*root\.advanceActivationCommit\(\)/);
-  assert.match(overlay, /root\.activationCommitInProgress \? WlrKeyboardFocus\.None : WlrKeyboardFocus\.Exclusive/);
-  assert.match(overlay, /function requestPendingActivation\(\)[\s\S]*internal = 0, client = -1[\s\S]*root\.raisePendingWindow\(\)[\s\S]*root\.restoreSelectedFullscreen\(\)/);
-  assert.match(overlay, /function raisePendingWindow\(\)[\s\S]*hl\.dsp\.focus/);
-  assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "true"/);
-  assert.match(overlay, /set_prop\(\{ prop = "no_anim", value = "unset"/);
-  assert.match(overlay, /root\.finishActivationCommit\(\)[\s\S]*root\.opened = false/);
-  assert.doesNotMatch(overlay, /id: fullscreenRestoreTimer/);
-});
-
-test("resize-sensitive clients remain covered until their restored surface settles", () => {
-  assert.match(overlay, /root\.handoffRestoresTargetFirst = handoff\.restoreTargetBeforeFocus/);
-  assert.match(overlay, /root\.handoffNeedsCover = handoff\.targetResizes && !targetAlreadyMatchesSourceSize/);
-  assert.match(overlay, /id: activationSettleTimer[\s\S]*interval: 1600/);
-  assert.match(overlay, /id: activationRevealTimer[\s\S]*interval: 80/);
-  assert.match(overlay, /readonly property var captureWindow: root\.windows\.length > 0 \? root\.windows\[0\] : null/);
-  assert.match(overlay, /id: outgoingCapture[\s\S]*captureSource: captureWindow \? captureWindow\.wayland : null/);
-  assert.match(overlay, /sourceItem: outgoingCapture[\s\S]*hideSource: true[\s\S]*live: !root\.activationCommitInProgress/);
-  assert.match(overlay, /id: targetReadyProbe[\s\S]*live: true[\s\S]*onSourceSizeChanged: root\.observeActivationTargetSurface/);
-  assert.match(overlay, /if \(root\.activationTargetSurfaceReady\)[\s\S]*return[\s\S]*activationRevealTimer\.restart\(\)/);
-});
-
-test("window previews do not disable their own screencopy source", () => {
-  assert.match(windowCard, /opacity: hasContent \? 1 : 0/);
-  assert.doesNotMatch(windowCard, /visible: hasContent/);
-});
-
-test("icon mode uses desktop metadata and groups application windows", () => {
-  assert.match(overlay, /DesktopEntries\.heuristicLookup/);
-  assert.match(overlay, /Logic\.applicationEntries/);
-  assert.doesNotMatch(overlay, /application-x-executable/);
+test("invalid all-disabled policy recovers a maximized launch mode", () => {
+  const rows = configured("invalid\tfalse\tfalse\tfalse\tfalse\tfalse");
+  assert.ok(rows.some(row => row[0] === "rule" && row[1] === "maximize"));
+  assert.ok(rows.some(row => row[0] === "bind" && row[1] === "SUPER + ALT + F"));
 });

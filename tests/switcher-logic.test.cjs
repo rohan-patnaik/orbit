@@ -19,7 +19,7 @@ test("safeAddress accepts only Hyprland hexadecimal addresses", () => {
 
 test("fullscreen state normalization preserves valid Hyprland states", () => {
   assert.equal(logic.fullscreenState(0), 0);
-  assert.equal(logic.fullscreenState(3), 3);
+  assert.equal(logic.fullscreenState(3), 2); // legacy bitmask clamps to current Hyprland full
   assert.equal(logic.fullscreenState(-1), 0);
   assert.equal(logic.fullscreenState(4), 0);
   assert.equal(logic.fullscreenState("2"), 2);
@@ -28,18 +28,18 @@ test("fullscreen state normalization preserves valid Hyprland states", () => {
   assert.equal(logic.resumableFullscreenState(0, 0), 0);
 });
 
-test("fullscreen handoff restores matching target state before focus transfer", () => {
+test("fullscreen handoff always explicitly releases the source before target promotion", () => {
   assert.deepEqual(
     JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(1, 1, 1))),
-    { restoreTargetBeforeFocus: true, releaseSource: false, targetResizes: false }
+    { restoreTargetBeforeFocus: true, releaseSource: true, targetResizes: false }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(2, 0, 2))),
-    { restoreTargetBeforeFocus: true, releaseSource: false, targetResizes: true }
+    { restoreTargetBeforeFocus: true, releaseSource: true, targetResizes: true }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(2, 1, 1))),
-    { restoreTargetBeforeFocus: false, releaseSource: true, targetResizes: false }
+    { restoreTargetBeforeFocus: true, releaseSource: true, targetResizes: false }
   );
   assert.deepEqual(
     JSON.parse(JSON.stringify(logic.fullscreenHandoffPlan(1, 0, 0))),
@@ -159,11 +159,14 @@ test("Alt+Tab targets the primary display independently of the focused display",
   assert.equal(logic.overlayMonitorName([{ id, overlayMonitor: "missing" }], id, monitors, "eDP-1"), "HDMI-A-1");
 });
 
-test("Windows snap layouts expose six scale-aware arrangements", () => {
+test("snap layouts expose five arrangements plus Maximized and Fullscreen", () => {
   const layouts = logic.snapLayouts();
-  assert.equal(layouts.length, 6);
+  assert.equal(layouts.length, 7);
   assert.equal(layouts[0].slots.length, 2);
-  assert.equal(layouts[5].slots.length, 4);
+  assert.equal(layouts[4].slots.length, 4);
+  assert.equal(layouts.some(layout => layout.id === "main-left"), false);
+  assert.equal(layouts[5].action, "maximized");
+  assert.equal(layouts[6].action, "fullscreen");
   const left = logic.snapGeometry(layouts[0].slots[0], {
     x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5,
     reserved: [0, 0, 0, 26]
@@ -183,9 +186,11 @@ test("window mode policy always retains a valid normal launch mode", () => {
   });
   assert.equal(modes.maximized, true);
   assert.equal(modes.defaultMode, "maximized");
+  assert.equal(modes.maximizeOnSwitch, false);
   const toggled = logic.toggleWindowMode(logic.defaultWindowModes(), "maximized");
   assert.equal(toggled.maximized, false);
   assert.equal(toggled.defaultMode, "tiled");
+  assert.equal(logic.toggleWindowMode(logic.defaultWindowModes(), "maximizeOnSwitch").maximizeOnSwitch, true);
   const entries = [{ id: "io.github.rohan-patnaik.window-switcher", windowModes: {
     defaultMode: "floating", tiled: false, floating: true, maximized: false
   } }];
