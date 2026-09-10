@@ -19,7 +19,7 @@ function overlay(overrides = {}) {
     pickerPresented: false, coverCaptureNeeded: false,
     selectedIndex: 0, snapQueryPending: false, snapGroups: [], snapRestoreStates: {},
     snapMonitorRows: [], snapClientRows: [], snapAnimationAddresses: [],
-    rememberedFullscreenStates: {}, handoffAnimationAddresses: [],
+    rememberedFullscreenStates: {}, previewSnapshots: {}, handoffAnimationAddresses: [],
     windowModes: logic.defaultWindowModes(), shell: { shellConfig: { plugins: [] } },
     dragState: { visible: false, session: 0 }, dragShownCount: 0, dragDropCount: 0,
     snapActiveReady: false, snapMonitorReady: false, snapClientsReady: false,
@@ -27,6 +27,7 @@ function overlay(overrides = {}) {
   Object.defineProperty(root, 'entries', { get: () => root.mode === 'icons' ? logic.applicationEntries(root.windows) : root.windows });
   Object.defineProperty(root, 'snapLayouts', { get: () => logic.availableSnapLayouts(root.windowModes) });
   Object.defineProperty(root, 'modifierPollingNeeded', { get: () => root.opened && root.releaseToActivate && root.switcherInputSource !== 'native' });
+  Object.defineProperty(root, 'sourcePreviewCaptureNeeded', { get: () => root.windows.length > 0 && logic.fullscreenState(root.windows[0].fullscreenState) > 0 });
   const env = vm.createContext({
     root, Logic: logic, console, Style: { gapsOut: 6 },
     Qt: { point: (x, y) => ({ x, y }) },

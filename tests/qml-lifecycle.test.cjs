@@ -28,6 +28,8 @@ QtObject {
     selectedBackground: "#304060", selectedText: "#ffffff", scrim: "#66000000"})
 }`);
     const base = process.env.ORBIT_QML_SOURCE_DIR || path.resolve(__dirname, '..');
+    const fixtureImage = path.join(dir, 'ratio-fixture.svg');
+    fs.writeFileSync(fixtureImage, '<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="700"><rect width="1000" height="700" fill="#123e57"/><circle cx="500" cy="350" r="150" fill="#ffc857"/></svg>');
     fs.writeFileSync(path.join(dir, 'shell.qml'), `import QtQuick
 import Quickshell
 import "${pathToFileURL(base + '/components').href}" as OrbitViews
@@ -43,7 +45,16 @@ ShellRoot {
   function windows(count) {
     return Array.from({length: count}, (_, i) => ({address: "0x" + (i+1).toString(16),
       title: "Fixture " + i, label: "Fixture " + i, wayland: null, iconSource: "", fallbackText: "F",
-      previewWidth: 800 + i * 20, previewHeight: 600}))
+      previewWidth: 800 + i * 20, previewHeight: 600,
+      previewSnapshot: i === 0 ? {url: "${pathToFileURL(fixtureImage).href}", width: 1000, height: 700} : null}))
+  }
+  function retainedImage(item) {
+    if (item.paintedWidth !== undefined && String(item.source).endsWith("ratio-fixture.svg")) return item
+    for (const child of item.children || []) {
+      const found = retainedImage(child)
+      if (found) return found
+    }
+    return null
   }
   function cards(item, result) {
     result = result || ({})
@@ -96,6 +107,10 @@ ShellRoot {
       } else if (test.stage === 4) {
         const current = test.cards(views.item.grid)
         for (const key of Object.keys(current)) test.check(current[key] === test.previous[key], "grid recreates same-page preview")
+        const image = test.retainedImage(current[0])
+        test.check(image !== null && image.status === Image.Ready, "retained image loads in the real QML card")
+        test.check(Math.abs(image.paintedWidth / image.paintedHeight - 10 / 7) < 0.001, "retained image is not stretched")
+        test.check(Math.abs((current[0].width - 16) / (current[0].height - 52) - 10 / 7) < 0.001, "grid uses image geometry instead of hidden tile")
       } else if (test.stage < 30) {
         views.item.flip.selectedIndex = (test.stage * 7) % 40
         views.item.grid.selectedIndex = test.stage % 25

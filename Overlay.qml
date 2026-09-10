@@ -17,6 +17,7 @@ Item {
   property bool opened: false
   property bool pickerPresented: false
   property bool coverCaptureNeeded: false
+  readonly property bool sourcePreviewCaptureNeeded: root.windows.length > 0 && Logic.fullscreenState(root.windows[0].fullscreenState) > 0
   readonly property bool modifierPollingNeeded: root.opened && root.releaseToActivate && root.switcherInputSource !== "native"
   property bool releaseToActivate: false
   property string releaseModifier: ""
@@ -38,6 +39,7 @@ Item {
   property var pendingFullscreenRelease: null
   property var pendingFullscreenRestore: null
   property var rememberedFullscreenStates: ({})
+  property var previewSnapshots: ({})
   property var handoffAnimationAddresses: []
   property bool handoffRestoresTargetFirst: false
   property bool handoffNeedsCover: false
@@ -327,7 +329,8 @@ Item {
       const application = applicationsByClass[applicationKey] || root.applicationInfo(applicationClass, initialClass, appId)
       applicationsByClass[applicationKey] = application
       const size = Array.isArray(ipc.size) ? ipc.size : []
-      rows.push({
+      const screen = root.screenForMonitorName(monitorName)
+      const row = {
         address: address,
         workspaceId: workspaceId,
         monitorName: monitorName,
@@ -346,12 +349,16 @@ Item {
         xwayland: ipc.xwayland === true,
         previewWidth: Number(size[0]) || 16,
         previewHeight: Number(size[1]) || 9,
+        previewIdentity: String(ipc.stableId || ipc.pid || "") + ":" + applicationClass,
+        previewMonitorKey: screen ? [screen.width, screen.height, screen.devicePixelRatio, Style.gapsOut].join(":") : "",
         positionX: Array.isArray(ipc.at) ? Number(ipc.at[0]) || 0 : 0,
         positionY: Array.isArray(ipc.at) ? Number(ipc.at[1]) || 0 : 0,
         floating: ipc.floating === true,
         toplevel: toplevel,
         wayland: wayland
-      })
+      }
+      row.previewSnapshot = Logic.restoredPreview(row, root.previewSnapshots[address])
+      rows.push(row)
     }
 
     return Logic.decorateDuplicateLabels(Logic.sortByRecency(rows))
@@ -974,6 +981,14 @@ Item {
     }
   }
 
+  function rememberWindowPreview(window, capture, width, height) {
+    // The readback callback may race a window closing. Do not resurrect its
+    // pixels or associate them with a later window at the same address.
+    if (!window || !root.windows.includes(window) || !(Hyprland.toplevels.values || []).some(toplevel => toplevel === window.toplevel))
+      return
+    root.previewSnapshots = Logic.rememberPreview(root.previewSnapshots, window, capture, width, height, 24)
+  }
+
   function rememberSourceFullscreen(source) {
     if (!source)
       return
@@ -1350,7 +1365,7 @@ Item {
         }))
     }
     root.snapGroups = nextGroups
-    for (const property of ["rememberedFullscreenStates", "snapRestoreStates"]) {
+    for (const property of ["rememberedFullscreenStates", "snapRestoreStates", "previewSnapshots"]) {
       const next = ({})
       for (const address of Object.keys(root[property])) {
         if (liveAddresses[address])
@@ -1513,7 +1528,9 @@ Item {
               address: window.address,
               app: window.applicationClass,
               monitor: window.monitorId,
-              icon: window.iconSource
+              icon: window.iconSource,
+              preview: Logic.previewDimensions(window),
+              retainedPreview: !!window.previewSnapshot
             })),
         committing: root.activationCommitInProgress,
         readiness: root.activationReadiness,
@@ -1522,7 +1539,9 @@ Item {
         resources: {
           pickerRequested: root.opened && root.pickerPresented,
           coverCaptureRequested: root.opened && root.coverCaptureNeeded,
-          modifierPolling: root.modifierPollingNeeded
+          sourcePreviewCaptureRequested: root.opened && root.sourcePreviewCaptureNeeded,
+          modifierPolling: root.modifierPollingNeeded,
+          retainedPreviews: Object.keys(root.previewSnapshots).length
         },
         input: {
           pending: root.snapshotPending,
@@ -1592,7 +1611,7 @@ Item {
     id: activationCommitTimer
     // Ordinary switches need one frame for the grab to unmap. Resize covers
     // retain their capture head start and the existing bounded retry cadence.
-    interval: root.activationCommitAttempts === 0 && !root.handoffNeedsCover ? 16 : 40
+    interval: root.activationCommitAttempts === 0 && !root.handoffNeedsCover && !root.sourcePreviewCaptureNeeded ? 16 : 40
     repeat: true
     onTriggered: root.advanceActivationCommit()
   }
@@ -2020,6 +2039,7 @@ Item {
                 windows: root.entries
                 selectedIndex: root.selectedIndex
                 hoverArmed: root.hoverArmed
+                onPreviewCaptured: (window, capture, width, height) => root.rememberWindowPreview(window, capture, width, height)
                 onSelectRequested: index => root.select(index)
                 onActivateRequested: index => {
                   root.select(index)
@@ -2037,6 +2057,7 @@ Item {
                 windows: root.entries
                 selectedIndex: root.selectedIndex
                 hoverArmed: root.hoverArmed
+                onPreviewCaptured: (window, capture, width, height) => root.rememberWindowPreview(window, capture, width, height)
                 onSelectRequested: index => root.select(index)
                 onActivateRequested: index => {
                   root.select(index)
@@ -2072,7 +2093,7 @@ Item {
       }
 
       LazyLoader {
-        active: root.coverCaptureNeeded
+        active: root.coverCaptureNeeded || root.sourcePreviewCaptureNeeded
 
         PanelWindow {
           // The picker stays on the primary display, but a resize cover belongs
@@ -2113,6 +2134,16 @@ Item {
               constraintSize: Qt.size(Math.max(1, handoffCover.width), Math.max(1, handoffCover.height))
               paintCursor: false
               live: false
+
+              onHasContentChanged: {
+                if (!hasContent || !captureWindow || captureWindow.fullscreenState === 0)
+                  return
+                const window = captureWindow
+                const sourceWidth = sourceSize.width
+                const sourceHeight = sourceSize.height
+                const size = Logic.previewCaptureSize(sourceWidth, sourceHeight)
+                grabToImage(capture => root.rememberWindowPreview(window, capture, sourceWidth, sourceHeight), Qt.size(size.width, size.height))
+              }
             }
 
             ShaderEffectSource {

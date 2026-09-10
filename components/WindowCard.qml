@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Wayland
 import qs.Commons
+import "../SwitcherLogic.js" as Logic
 
 Rectangle {
   id: root
@@ -10,9 +11,11 @@ Rectangle {
   property bool selected: false
   property bool hoverArmed: false
   property bool previewEnabled: true
+  readonly property var previewSnapshot: windowData ? windowData.previewSnapshot || null : null
 
   signal selectRequested(int index)
   signal activateRequested(int index)
+  signal previewCaptured(var window, var capture, real width, real height)
 
   radius: Style.cornerRadius
   color: root.selected ? Color.menu.selectedBackground : Color.background
@@ -41,18 +44,39 @@ Rectangle {
       height: width
       iconSource: root.windowData ? root.windowData.iconSource : ""
       fallbackText: root.windowData ? root.windowData.fallbackText : "?"
-      opacity: preview.hasContent ? 0 : 0.82
+      opacity: preview.hasContent || retainedPreview.status === Image.Ready ? 0 : 0.82
+    }
+
+    Image {
+      id: retainedPreview
+
+      anchors.fill: parent
+      source: root.previewEnabled && root.previewSnapshot ? root.previewSnapshot.url : ""
+      fillMode: Image.PreserveAspectFit
+      cache: false
     }
 
     ScreencopyView {
       id: preview
 
-      anchors.fill: parent
-      captureSource: root.previewEnabled && root.windowData ? root.windowData.wayland : null
+      anchors.centerIn: parent
+      width: implicitWidth
+      height: implicitHeight
+      captureSource: root.previewEnabled && root.windowData && !root.previewSnapshot ? root.windowData.wayland : null
       paintCursor: false
       live: false
-      constraintSize: Qt.size(Math.max(1, width), Math.max(1, height))
+      constraintSize: Qt.size(Math.max(1, previewFrame.width), Math.max(1, previewFrame.height))
       opacity: hasContent ? 1 : 0
+
+      onHasContentChanged: {
+        if (!hasContent || !root.windowData || root.windowData.fullscreenState === 0)
+          return
+        const window = root.windowData
+        const sourceWidth = sourceSize.width
+        const sourceHeight = sourceSize.height
+        const size = Logic.previewCaptureSize(sourceWidth, sourceHeight)
+        grabToImage(capture => root.previewCaptured(window, capture, sourceWidth, sourceHeight), Qt.size(size.width, size.height))
+      }
     }
   }
 

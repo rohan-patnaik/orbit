@@ -13,6 +13,7 @@ Item {
 
   signal selectRequested(int index)
   signal activateRequested(int index)
+  signal previewCaptured(var window, var capture, real width, real height)
 
   readonly property int pageSize: 12
   readonly property int firstIndex: Logic.pageStart(root.selectedIndex, root.pageSize)
@@ -50,6 +51,7 @@ Item {
       previewEnabled: true
       onSelectRequested: requestedIndex => root.selectRequested(requestedIndex)
       onActivateRequested: requestedIndex => root.activateRequested(requestedIndex)
+      onPreviewCaptured: (window, capture, width, height) => root.previewCaptured(window, capture, width, height)
     }
   }
 

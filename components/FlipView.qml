@@ -13,6 +13,7 @@ Item {
 
   signal selectRequested(int index)
   signal activateRequested(int index)
+  signal previewCaptured(var window, var capture, real width, real height)
 
   readonly property real cardWidth: Math.min(Style.space(430), maximumWidth * 0.5)
   readonly property real cardHeight: Math.min(Style.space(282), maximumHeight * 0.68)
@@ -67,6 +68,7 @@ Item {
 
         onSelectRequested: requestedIndex => root.selectRequested(requestedIndex)
         onActivateRequested: requestedIndex => root.activateRequested(requestedIndex)
+        onPreviewCaptured: (window, capture, width, height) => root.previewCaptured(window, capture, width, height)
       }
     }
   }

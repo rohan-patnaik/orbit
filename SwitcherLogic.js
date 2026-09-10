@@ -532,7 +532,57 @@ function previewAspect(width, height) {
   var h = Number(height)
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0)
     return 16 / 9
-  return Math.max(0.25, Math.min(5, w / h))
+  return w / h
+}
+
+function previewDimensions(window) {
+  var snapshot = window && window.previewSnapshot
+  return snapshot || { width: window ? window.previewWidth : 16,
+    height: window ? window.previewHeight : 9 }
+}
+
+function previewCaptureSize(width, height) {
+  var aspect = previewAspect(width, height)
+  var h = Math.min(400, 640 / aspect, Number(height) || 400)
+  return { width: Math.max(1, Math.round(h * aspect)), height: Math.max(1, Math.round(h)) }
+}
+
+function restoredPreview(window, snapshot) {
+  // Only Orbit's temporary layout demotion may use an older image. A real
+  // mode change, move, new window at a reused address, or manual snap must
+  // immediately use the new live geometry instead.
+  if (!window || !snapshot
+      || (window.floating === true) !== snapshot.floating
+      || (window.pinned === true) !== snapshot.pinned
+      || fullscreenState(window.fullscreenState) !== 0
+      || fullscreenState(window.clientFullscreenState) !== snapshot.mode
+      || window.previewIdentity !== snapshot.identity
+      || window.previewMonitorKey !== snapshot.monitorKey
+      || window.workspaceId !== snapshot.workspaceId
+      || window.monitorId !== snapshot.monitorId) return null
+  return { url: snapshot.capture.url, width: snapshot.width, height: snapshot.height }
+}
+
+function rememberPreview(snapshots, window, capture, width, height, limit) {
+  var mode = window ? fullscreenState(window.fullscreenState) : 0
+  if (!mode || !capture || !capture.url
+      || !(width > 0 && height > 0)) return snapshots
+  // An asynchronous capture can arrive after the compositor resized the
+  // source. Never replace a good full-window image with that narrow tile.
+  var expected = previewAspect(window.previewWidth, window.previewHeight)
+  if (Math.abs(width / height / expected - 1) > 0.01) return snapshots
+  var next = {}
+  var keys = Object.keys(snapshots || {}).filter(function(address) { return address !== window.address })
+  var maximum = Math.max(1, Number(limit) || 24)
+  for (var i = Math.max(0, keys.length - maximum + 1); i < keys.length; i++)
+    next[keys[i]] = snapshots[keys[i]]
+  next[window.address] = {
+    capture: capture, width: width, height: height, mode: mode,
+    identity: window.previewIdentity, monitorKey: window.previewMonitorKey,
+    floating: window.floating === true, pinned: window.pinned === true,
+    workspaceId: window.workspaceId, monitorId: window.monitorId
+  }
+  return next
 }
 
 function rowPartitions(length, rowCount) {
@@ -567,7 +617,8 @@ function aspectGridLayout(rows, availableWidth, availableHeight, spacing,
   var fixedHeight = Math.max(0, Number(fixedCardHeight) || 0)
   var previewCap = Math.max(1, Number(maximumPreviewHeight) || 1)
   var aspects = source.map(function(row) {
-    return previewAspect(row.previewWidth, row.previewHeight)
+    var dimensions = previewDimensions(row)
+    return previewAspect(dimensions.width, dimensions.height)
   })
 
   var best = null

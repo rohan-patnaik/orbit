@@ -32,9 +32,27 @@ Orbit also adds a Windows-inspired desktop layout layer:
   complete implementation of Windows Snap Groups.
 
 Grid and Flip use bounded, one-frame Quickshell window captures. Grid sizes cards
-from the source aspect ratios to avoid artificial padding while keeping the whole
-window visible. Letterboxing produced inside an app or video is retained. Captures are released when the
-overlay closes and are never written to disk or sent over the network. Icons are
+from the source aspect ratios while keeping the whole window visible. Both views
+fit images proportionally, including portrait and ultrawide windows. Letterboxing
+produced inside an app or video is retained.
+
+Hyprland temporarily returns a maximized/fullscreen window to its underlying tile
+when Orbit switches away on the same workspace. Orbit keeps a small image of that
+window before the handoff and reuses its image **and dimensions** while the window
+awaits restoration. This prevents hidden Firefox or T3 Code windows from becoming
+narrow previews. Visible windows and intentional tiled, floating or snapped layouts
+use fresh captures; changing mode, workspace, monitor, display size/scale or window
+identity invalidates the saved preview. Explicit fullscreen on a floating window
+can retain its preview too.
+
+The cache holds at most 24 images, each fitting within 640×400 pixels (at most
+24.6 MB of RGBA image data, excluding Qt/GPU overhead). Closing a window releases its
+saved image. Full-resolution capture buffers are released when the overlay closes.
+Images stay in memory and are never written to disk or sent over the network.
+After a shell restart or cache eviction, an already hidden window initially uses
+its available live capture; its full preview becomes available after it is shown
+and captured on a subsequent Orbit switch. Orbit does not resize or activate
+background apps merely to manufacture thumbnails. Icons are
 resolved from installed desktop entries and the local icon theme; Orbit does not
 download icons. Icons mode chooses a light or dark backplate from the actual icon
 pixels, including themed image-provider icons. A monogram is used when the icon is
@@ -42,7 +60,9 @@ missing or fails to load.
 
 Orbit reduces work on the switching path: ordinary switches
 use a 16 ms initial unmap timer, then advance as soon as the compositor confirms
-focus. Resize handoffs retain their 40 ms capture head start and 80 ms rendering
+focus. A maximized/fullscreen source also gets the 40 ms capture head start when
+switching to a destination that needs no resize. Resize handoffs retain their
+40 ms capture head start and 80 ms rendering
 guard. These are configured waits, not measured end-to-end latency guarantees.
 Native Alt holds need no modifier-polling processes; unloading the bridge restores
 the fallback. Native gestures wait 75 ms after the window query before presenting
