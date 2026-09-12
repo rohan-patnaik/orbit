@@ -227,3 +227,20 @@ test("flip mode instantiates at most seven unique neighboring windows", () => {
   assert.equal(new Set(Array.from(entries, entry => entry.windowIndex)).size, 7);
   assert.equal(entries.find(entry => entry.offset === 0).windowIndex, 0);
 });
+
+test("taskbar-minimized windows retain scope and background windows stay excluded", () => {
+  const ipc = {mapped:true, workspace:{id:-97,name:"special:taskbar-minimized-1-2-1-0-abc"}};
+  const eligible = (win, scope, ws=1) => logic.isEligibleWindow(win,-97,"HDMI-A-1",1,scope,[ws],["HDMI-A-1"],[1],ws,"HDMI-A-1",1);
+  assert.equal(logic.taskbarMinimizedState(ipc).workspaceId,1);
+  assert.equal(logic.taskbarMinimizedState(ipc).internal,2);
+  for (const scope of ["all","visible","monitor"]) assert.equal(eligible(ipc,scope),true);
+  for (const scope of ["visible","monitor"]) assert.equal(eligible(ipc,scope,2),false);
+  assert.equal(eligible({...ipc,mapped:false},"all"),false);
+  const pinned = {...ipc,workspace:{name:"special:taskbar-minimized-1-2-1-1-abc"}};
+  assert.equal(eligible(pinned,"monitor",2),true);
+  for (const name of ["special:codex-background","special:wispr-flow-background","special:taskbar-minimized-bogus"]) {
+    const background={mapped:true,workspace:{name}};
+    assert.equal(logic.taskbarMinimizedState(background),null);
+    for (const scope of ["all","visible","monitor"]) assert.equal(eligible(background,scope),false);
+  }
+});

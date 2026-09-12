@@ -311,3 +311,19 @@ test('snap group raises companions first and the chosen member last using valid 
   assert.ok(calls.every(c=>c.includes('mode = "top"')));
   assert.ok(calls[2].includes('address:0xb'));
 });
+
+test('activation restores a taskbar-minimized window exactly once before focusing', () => {
+  const {execFileSync}=require('node:child_process');
+  const script=logic.activationScript('', '0xb', 2, false, 0, []);
+  execFileSync('lua',['-'],{input:`
+    local t={address="0xb",mapped=true,workspace={id=-97,name="special:taskbar-minimized-7-2-1-1-b"},fullscreen=0,fullscreen_client=0};
+    local moves=0;local pins=0;local states=0;local focused=false;
+    hl={get_window=function()return t end,dispatch=function(f)f()end,dsp={window={}}};
+    hl.dsp.window.move=function(v)return function()assert(v.workspace=="7" and v.follow==false);t.workspace={id=7,name="7"};moves=moves+1 end end;
+    hl.dsp.window.fullscreen_state=function(v)return function()assert(t.workspace.id==7 and v.internal==2 and v.client==1);t.fullscreen=v.internal;t.fullscreen_client=v.client;states=states+1 end end;
+    hl.dsp.window.pin=function(v)return function()assert(v.action=="on");pins=pins+1 end end;
+    hl.dsp.focus=function(v)return function()assert(moves==1 and pins==1 and states==1);focused=true end end;
+    hl.dsp.window.alter_zorder=function()return function()end end;
+    ${script};assert(focused);${script};assert(moves==1 and pins==1 and states==1);
+  `});
+});

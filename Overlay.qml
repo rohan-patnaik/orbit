@@ -310,7 +310,8 @@ Item {
       if (!address || ipc.mapped === false)
         continue
       const toplevel = toplevelByAddress[address] || null
-      const workspaceId = Number(ipc.workspace ? ipc.workspace.id : -1)
+      const minimized = Logic.taskbarMinimizedState(ipc)
+      const workspaceId = minimized ? minimized.workspaceId : Number(ipc.workspace ? ipc.workspace.id : -1)
       const monitorName = toplevel && toplevel.monitor ? String(toplevel.monitor.name || "") : ""
       const monitorId = Number(ipc.monitor)
 
@@ -339,10 +340,10 @@ Item {
         fallbackText: application.fallbackText,
         title: title,
         focusHistoryId: Logic.focusHistoryId(ipc.focusHistoryID),
-        fullscreenState: Logic.fullscreenState(ipc.fullscreen),
-        clientFullscreenState: Logic.fullscreenState(ipc.fullscreenClient),
+        fullscreenState: Logic.fullscreenState(minimized ? minimized.internal : ipc.fullscreen),
+        clientFullscreenState: Logic.fullscreenState(minimized ? minimized.client : ipc.fullscreenClient),
         groupIndex: Logic.groupIndex(ipc.grouped, address),
-        pinned: ipc.pinned === true,
+        pinned: minimized ? minimized.pinned : ipc.pinned === true,
         xwayland: ipc.xwayland === true,
         previewWidth: Number(size[0]) || 16,
         previewHeight: Number(size[1]) || 9,

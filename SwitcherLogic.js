@@ -66,12 +66,23 @@ function listIncludesString(values, value) {
   return false
 }
 
+// Taskbar minimization parks ordinary windows in a special workspace whose
+// name preserves their original workspace and presentation state.
+function taskbarMinimizedState(ipc) {
+  var name = String(ipc && ipc.workspace ? ipc.workspace.name || "" : "")
+  var match = /^special:taskbar-minimized-([1-9][0-9]*)-([0-3])-([0-3])-([01])-[0-9a-f]+$/.exec(name)
+  return match ? { workspaceId: Number(match[1]), internal: Number(match[2]),
+    client: Number(match[3]), pinned: match[4] === "1" } : null
+}
+
 function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
     visibleWorkspaceIds, visibleMonitorNames, visibleMonitorIds,
     activeWorkspaceId, activeMonitorName, activeMonitorId) {
   if (!ipc || ipc.mapped === false) return false
   var normalizedScope = normalizeScope(scope)
-  var workspace = Number(workspaceId)
+  var minimized = taskbarMinimizedState(ipc)
+  var workspace = minimized ? minimized.workspaceId : Number(workspaceId)
+  var pinned = minimized ? minimized.pinned : ipc.pinned === true
   if (normalizedScope === "all") {
     var name = String(ipc.workspace ? ipc.workspace.name || "" : "")
     return workspace > 0 || (name !== "" && !name.startsWith("special:"))
@@ -79,13 +90,13 @@ function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
 
   if (normalizedScope === "monitor") {
     if (workspace === Number(activeWorkspaceId)) return true
-    if (ipc.pinned !== true) return false
+    if (!pinned) return false
     if (monitorName && activeMonitorName) return monitorName === activeMonitorName
     return Number(monitorId) === Number(activeMonitorId)
   }
 
   if (listIncludesNumber(visibleWorkspaceIds, workspace)) return true
-  if (ipc.pinned !== true) return false
+  if (!pinned) return false
   if (listIncludesString(visibleMonitorNames, monitorName)) return true
   return listIncludesNumber(visibleMonitorIds, monitorId)
 }
@@ -491,6 +502,11 @@ function activationScript(sourceValue, targetValue, desiredState, restoreFirst, 
   var source = safeAddress(sourceValue)
   var desired = fullscreenState(desiredState)
   var script = 'local t = hl.get_window("address:' + target + '"); if not t or not t.mapped then return end; '
+    // Re-read minimization at commit time: retries must not move a window twice.
+    + 'local mw,mi,mc,mp; if t.workspace and t.workspace.name then mw,mi,mc,mp = t.workspace.name:match("^special:taskbar%-minimized%-([1-9]%d*)%-([0-3])%-([0-3])%-([01])%-[0-9a-f]+$") end; '
+    + 'if mw then hl.dispatch(hl.dsp.window.move({workspace=mw,follow=false,window=t})); '
+    + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=tonumber(mi),client=tonumber(mc),action="set",window=t})); '
+    + 'if mp == "1" then hl.dispatch(hl.dsp.window.pin({action="on",window=t})) end end; '
     + 'local function state(w, mode) if w and w.mapped and w.fullscreen ~= mode then '
     + 'local client = w.fullscreen_client; if mode == 1 and client == 0 then client = 1 end; '
     + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=mode,client=client,action="set",window=w})) end end; '
