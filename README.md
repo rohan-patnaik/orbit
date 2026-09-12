@@ -4,6 +4,13 @@ Orbit is a native Omarchy Quattro overlay for switching between windows visible 
 all connected monitors. Grid and Flip keep separate windows from the same application
 as separate entries. Browser tabs are outside the plugin's scope.
 
+## At a glance
+
+- Switch the windows on every connected monitor from one focused, keyboard-first overlay.
+- Choose **Grid**, **Flip**, or **Icons**—each designed to keep individual windows visible and recognisable.
+- Use **Snap Layouts** and **Snap Assist** to place windows quickly without leaving the keyboard.
+- Resolve icons and captures locally; Orbit does not download window data or write captures to disk.
+
 The plugin provides three modes:
 
 - **Icons** — a macOS-style strip with one locally resolved official icon per
@@ -283,8 +290,7 @@ omarchy restart shell
 journalctl --user -u omarchy-shell.service -n 100 --no-pager
 ```
 
-The root `preview.png` is the original monochrome marketplace mark for this
-plugin listing.
+The root `preview.png` is the marketplace cover for this plugin listing.
 
 The [0.6.2 release notes](docs/RELEASE-0.6.2.md) describe the patch and upgrade steps.
 The [performance validation](docs/PERFORMANCE-2026-09-05.md) records the measured

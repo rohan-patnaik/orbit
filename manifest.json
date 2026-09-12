@@ -5,7 +5,7 @@
   "version": "0.6.2",
   "author": "Rohan Patnaik",
   "license": "MIT",
-  "description": "Windows-style multi-monitor switching and snap layouts for Omarchy Quattro.",
+  "description": "Switch across monitors with live previews, three visual modes, Snap Layouts, and Snap Assist for Omarchy Quattro.",
   "kinds": [
     "overlay"
   ],
