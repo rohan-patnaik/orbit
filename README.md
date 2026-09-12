@@ -1,7 +1,7 @@
 # Omarchy Orbit
 
 Orbit is a native Omarchy Quattro overlay for switching between windows visible across
-all connected monitors. Grid and Flip keep separate windows from the same application
+all connected monitors. All three views keep separate windows from the same application
 as separate entries. Browser tabs are outside the plugin's scope.
 
 ## At a glance
@@ -13,8 +13,8 @@ as separate entries. Browser tabs are outside the plugin's scope.
 
 The plugin provides three modes:
 
-- **Icons** — a macOS-style strip with one locally resolved official icon per
-  application and its most recently used window as the activation target.
+- **Icons** — a strip with one locally resolved official icon per window.
+  Repeated applications receive numbered labels; each icon activates its own window.
 - **Flip** — an angled stack of window previews.
 - **Grid** — an adaptive, aspect-aware thumbnail grid and the default mode.
 

@@ -94,17 +94,17 @@ test("duplicate application labels receive stable ordinals", () => {
   assert.deepEqual(Array.from(rows, row => row.label), ["Firefox 1", "Firefox 2", "Terminal"]);
 });
 
-test("icon mode groups windows by application and preserves MRU representatives", () => {
+test("icon mode preserves every window in MRU order with distinct labels", () => {
   const entries = logic.applicationEntries([
     { appKey: "firefox", appName: "Firefox", address: "0x1", title: "Recent" },
     { appKey: "terminal", appName: "Terminal", address: "0x2", title: "Shell" },
     { appKey: "firefox", appName: "Firefox", address: "0x3", title: "Older" }
   ]);
-  assert.equal(entries.length, 2);
+  assert.equal(entries.length, 3);
   assert.equal(entries[0].address, "0x1");
-  assert.deepEqual(Array.from(entries[0].memberAddresses), ["0x1", "0x3"]);
-  assert.equal(entries[0].windowCount, 2);
-  assert.equal(logic.entryIndexForAddress(entries, "0x3"), 0);
+  assert.deepEqual(Array.from(entries, row => row.address), ["0x1", "0x2", "0x3"]);
+  assert.deepEqual(Array.from(entries, row => row.label), ["Firefox 1", "Terminal", "Firefox 2"]);
+  assert.equal(logic.entryIndexForAddress(entries, "0x3"), 2);
   assert.equal(logic.appMonogram("Visual Studio Code"), "VC");
 });
 

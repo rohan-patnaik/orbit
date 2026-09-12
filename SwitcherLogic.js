@@ -159,28 +159,8 @@ function normalizeApplicationKey(value) {
 
 function applicationEntries(rows) {
   if (!Array.isArray(rows)) return []
-  var grouped = []
-  var byKey = {}
-
-  for (var i = 0; i < rows.length; i++) {
-    var row = rows[i]
-    var key = normalizeApplicationKey(row.appKey || row.applicationClass)
-    var entry = byKey[key]
-    if (!entry) {
-      entry = {}
-      for (var property in row) entry[property] = row[property]
-      entry.appKey = key
-      entry.label = String(row.appName || friendlyAppName(row.applicationClass))
-      entry.memberAddresses = []
-      entry.windowCount = 0
-      byKey[key] = entry
-      grouped.push(entry)
-    }
-    entry.memberAddresses.push(safeAddress(row.address))
-    entry.windowCount++
-  }
-
-  return grouped
+  // Icons are a window view: preserve every address and the input MRU order.
+  return decorateDuplicateLabels(rows)
 }
 
 function entryIndexForAddress(rows, address) {

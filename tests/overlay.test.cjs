@@ -6,6 +6,43 @@ const main = { id: 1, name: 'HDMI-A-1', x: 0, y: 0, width: 1920, height: 1080, s
 const laptop = { id: 0, name: 'eDP-1', x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5 };
 const app = { address: '0xa', monitor: 1, workspace: { id: 1 }, at: [10, 10], size: [800, 600], fullscreen: 0 };
 
+for (const mode of ['icons', 'grid', 'flip']) {
+  for (const targetIndex of [0, 1]) {
+    test(`${mode} activates duplicate window ${targetIndex + 1} by its own address`, () => {
+      const windows = logic.decorateDuplicateLabels([
+        { address: '0xa', appName: 'Firefox', appKey: 'firefox' },
+        { address: '0xb', appName: 'Firefox', appKey: 'firefox' }
+      ]);
+      const { root } = overlay({ opened: true, mode, windows, selectedIndex: targetIndex });
+      root.accept();
+      assert.equal(root.pendingWindow.address, targetIndex === 0 ? '0xa' : '0xb');
+      assert.equal(root.activationCommitInProgress, true);
+    });
+  }
+  test(`${mode} opens with two windows of one app and keeps their exact selection across views`, () => {
+    const { root } = overlay();
+    root.configuredMode = () => mode;
+    root.startSwitcher(false, '', 1);
+    root.completeWindowQuery(json([
+      { ...app, class: 'firefox', title: 'First', focusHistoryID: 0 },
+      { ...app, address: '0xb', class: 'firefox', title: 'Second', focusHistoryID: 1 }
+    ]));
+    assert.equal(root.opened, true);
+    assert.deepEqual(Array.from(root.entries, w => w.address), ['0xa', '0xb']);
+    assert.equal(root.entries[root.selectedIndex].address, '0xb');
+    for (const next of ['grid', 'icons', 'flip', 'icons']) {
+      root.setMode(next);
+      assert.equal(root.entries.length, 2);
+      assert.equal(root.entries[root.selectedIndex].address, '0xb');
+    }
+    root.select(0);
+    assert.equal(root.entries[root.selectedIndex].address, '0xa');
+    root.select(1);
+    assert.equal(root.entries[root.selectedIndex].address, '0xb');
+    root.cancel();
+  });
+}
+
 test('switcher requested on laptop targets main while admitting both visible workspaces', () => {
   const { root } = overlay();
   root.startSwitcher(true, 'alt', 1);

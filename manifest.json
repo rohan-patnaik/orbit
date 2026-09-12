@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rohan-patnaik.window-switcher",
   "name": "Orbit",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "author": "Rohan Patnaik",
   "license": "MIT",
   "description": "Switch across monitors with live previews, three visual modes, Snap Layouts, and Snap Assist for Omarchy Quattro.",
