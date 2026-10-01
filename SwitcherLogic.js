@@ -70,9 +70,10 @@ function listIncludesString(values, value) {
 // name preserves their original workspace and presentation state.
 function taskbarMinimizedState(ipc) {
   var name = String(ipc && ipc.workspace ? ipc.workspace.name || "" : "")
-  var match = /^special:taskbar-minimized-([1-9][0-9]*)-([0-3])-([0-3])-([01])-[0-9a-f]+$/.exec(name)
-  return match ? { workspaceId: Number(match[1]), internal: Number(match[2]),
-    client: Number(match[3]), pinned: match[4] === "1" } : null
+  var match = /^special:taskbar-minimized-(-?[1-9][0-9]*)-([0-3])-([0-3])-([01])-[0-9a-f]+(?:-((?:[0-9a-f]{2})+)-((?:[0-9a-f]{2})+))?$/.exec(name)
+  if (!match || (Number(match[1]) < 0 && !match[5])) return null
+  return { workspaceId: Number(match[1]), internal: Number(match[2]),
+    client: Number(match[3]), pinned: match[4] === "1" }
 }
 
 function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
@@ -85,7 +86,7 @@ function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
   var pinned = minimized ? minimized.pinned : ipc.pinned === true
   if (normalizedScope === "all") {
     var name = String(ipc.workspace ? ipc.workspace.name || "" : "")
-    return workspace > 0 || (name !== "" && !name.startsWith("special:"))
+    return !!minimized || workspace > 0 || (name !== "" && !name.startsWith("special:"))
   }
 
   if (normalizedScope === "monitor") {
@@ -483,8 +484,13 @@ function activationScript(sourceValue, targetValue, desiredState, restoreFirst, 
   var desired = fullscreenState(desiredState)
   var script = 'local t = hl.get_window("address:' + target + '"); if not t or not t.mapped then return end; '
     // Re-read minimization at commit time: retries must not move a window twice.
-    + 'local mw,mi,mc,mp; if t.workspace and t.workspace.name then mw,mi,mc,mp = t.workspace.name:match("^special:taskbar%-minimized%-([1-9]%d*)%-([0-3])%-([0-3])%-([01])%-[0-9a-f]+$") end; '
-    + 'if mw then hl.dispatch(hl.dsp.window.move({workspace=mw,follow=false,window=t})); '
+    + 'local mw,mi,mc,mp,wn,mn; if t.workspace and t.workspace.name then '
+    + 'mw,mi,mc,mp,wn,mn=t.workspace.name:match("^special:taskbar%-minimized%-(-?[1-9]%d*)%-([0-3])%-([0-3])%-([01])%-[0-9a-f]+%-([0-9a-f]+)%-([0-9a-f]+)$"); '
+    + 'if not mw then mw,mi,mc,mp=t.workspace.name:match("^special:taskbar%-minimized%-([1-9]%d*)%-([0-3])%-([0-3])%-([01])%-[0-9a-f]+$") end end; '
+    + 'if mw and (tonumber(mw)>0 or wn) and (not wn or (#wn%2==0 and #mn%2==0)) then local function unhex(s) return (s:gsub("..",function(c) return string.char(tonumber(c,16)) end)) end; '
+    + 'local destination=tonumber(mw)>0 and mw or ("name:"..unhex(wn)); local existed=not mn or hl.get_workspace(destination); '
+    + 'hl.dispatch(hl.dsp.window.move({workspace=destination,follow=false,window=t})); '
+    + 'if not existed and mn then for _,m in ipairs(hl.get_monitors()) do if m.name==unhex(mn) then hl.dispatch(hl.dsp.workspace.move({workspace=destination,monitor=m.name})); break end end end; '
     + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=tonumber(mi),client=tonumber(mc),action="set",window=t})); '
     + 'if mp == "1" then hl.dispatch(hl.dsp.window.pin({action="on",window=t})) end end; '
     + 'local function state(w, mode) if w and w.mapped and w.fullscreen ~= mode then '
@@ -721,4 +727,32 @@ function flipOffset(index, selectedIndex, length, maximumVisible) {
   var after = count - before - 1
   var offset = wrapIndex(index - selectedIndex + before, length) - before
   return offset <= after ? offset : null
+}
+
+
+function isBrowserAppClass(value) {
+  return /^(chrome|chromium|brave|msedge|vivaldi|opera|helium)-/.test(String(value || "").toLowerCase())
+}
+
+function webAppDesktopEntry(aliases, applications) {
+  var values = Array.isArray(aliases) ? aliases : []
+  var entries = applications && typeof applications.length === "number" ? applications : []
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i]
+    var command = String(entry ? entry.execString : "")
+    if (!/(?:omarchy-launch-webapp|--app=)/.test(command)) continue
+    var urls = command.match(/https?:\/\/[^\s"']+/g) || []
+    for (var u = 0; u < urls.length; u++) {
+      // Chromium generates the app name from host + "_" + path, not query.
+      var url = /^https?:\/\/([^/:?#]+)(?::[0-9]+)?([^?#]*)/.exec(urls[u])
+      if (!url) continue
+      var encoded = (url[1] + "_" + (url[2] || "/")).replace(/[^a-zA-Z0-9.]/g, "_").toLowerCase()
+      for (var a = 0; a < values.length; a++) {
+        var candidate = String(values[a] || "").toLowerCase()
+        if (isBrowserAppClass(candidate)
+            && candidate.substring(candidate.indexOf("-") + 1).indexOf(encoded + "-") === 0) return entry
+      }
+    }
+  }
+  return null
 }

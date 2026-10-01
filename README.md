@@ -300,3 +300,7 @@ promotion is tracked separately in the [exact-commit update request](https://git
 ## License
 
 MIT
+
+The [0.6.4 compatibility notes](docs/RELEASE-0.6.4.md) cover web-app icons and
+extended taskbar minimize records. Taskbar icon ordering stays in the taskbar;
+Orbit retains MRU window switching.

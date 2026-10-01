@@ -194,13 +194,19 @@ Item {
         return desktopEntryInfo(entry, originalClass)
     }
 
-    for (const variant of variants) {
+    const webApp = Logic.webAppDesktopEntry(rawVariants, applications)
+    if (webApp)
+      return desktopEntryInfo(webApp, originalClass)
+    // A browser --app window must not inherit its host browser's icon/identity.
+    const browserApp = rawVariants.some(Logic.isBrowserAppClass)
+
+    for (const variant of browserApp ? [] : variants) {
       const entry = DesktopEntries.heuristicLookup(variant)
       if (entry)
         return desktopEntryInfo(entry, originalClass)
     }
 
-    for (const variant of variants) {
+    for (const variant of browserApp ? rawVariants : variants) {
       const icon = Quickshell.iconPath(variant, true)
       if (icon) {
         return {
@@ -222,10 +228,24 @@ Item {
 
   function desktopEntryInfo(entry, fallbackName) {
     const name = String(entry.name || Logic.friendlyAppName(fallbackName))
+    const value = String(entry.icon || "")
+    let icon = value.startsWith("/") ? Util.fileUrl(value) : /^(file|image):\/\//.test(value) ? value : value ? Quickshell.iconPath(value, true) : ""
+    // Some generated launchers omit Icon although an app icon is installed.
+    for (const identity of [entry.id, fallbackName]) {
+      if (icon)
+        break
+      const id = String(identity || "").replace(/\.desktop$/i, "")
+      for (const candidate of [id, id.split(".").pop().toLowerCase()]) {
+        if (candidate)
+          icon = Quickshell.iconPath(candidate, true)
+        if (icon)
+          break
+      }
+    }
     return {
       id: Logic.normalizeApplicationKey(entry.id || fallbackName),
       name: name,
-      icon: entry.icon ? Quickshell.iconPath(entry.icon, true) : "",
+      icon: icon,
       fallbackText: Logic.appMonogram(name)
     }
   }
