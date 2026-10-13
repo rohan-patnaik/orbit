@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const { spawnSync } = require('node:child_process');
 
 test('real offscreen QML keeps bounded previews alive while cycling and releases them on close', t => {
@@ -28,9 +27,14 @@ QtObject {
     selectedBackground: "#304060", selectedText: "#ffffff", scrim: "#66000000"})
 }`);
     const base = process.env.ORBIT_QML_SOURCE_DIR || path.resolve(__dirname, '..');
+    // Keep qs.Commons and the actual view sources under one configuration
+    // root. Importing external views can resolve their qs namespace against
+    // the host's shell instead of these deterministic theme fixtures.
+    fs.cpSync(path.join(base, 'components'), path.join(dir, 'components'), { recursive: true });
+    fs.copyFileSync(path.join(base, 'SwitcherLogic.js'), path.join(dir, 'SwitcherLogic.js'));
     fs.writeFileSync(path.join(dir, 'shell.qml'), `import QtQuick
 import Quickshell
-import "${pathToFileURL(base + '/components').href}" as OrbitViews
+import "components" as OrbitViews
 ShellRoot {
   id: test
   property int stage: 0
