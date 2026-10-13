@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as OrbitTheme
 
 Row {
   id: root
@@ -29,14 +30,14 @@ Row {
       width: Style.space(82)
       height: Style.space(28)
       radius: height / 2
-      color: selected ? Color.menu.selectedBackground : (hoverHandler.hovered ? Qt.alpha(Color.menu.text, 0.08) : "transparent")
+      color: selected ? OrbitTheme.Color.menu.selectedBackground : (hoverHandler.hovered ? Qt.alpha(OrbitTheme.Color.menu.text, 0.08) : "transparent")
       border.width: selected ? 1 : 0
-      border.color: Color.accent
+      border.color: OrbitTheme.Color.accent
 
       Text {
         anchors.centerIn: parent
         text: (["icons", "flip", "grid"].indexOf(pill.modelData) + 1) + "  " + String(pill.modelData).charAt(0).toUpperCase() + String(pill.modelData).slice(1)
-        color: pill.selected ? Color.menu.selectedText : Color.menu.text
+        color: pill.selected ? OrbitTheme.Color.menu.selectedText : OrbitTheme.Color.menu.text
         opacity: pill.selected || hoverHandler.hovered ? 1 : 0.68
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption

@@ -3,6 +3,7 @@ import Qt5Compat.GraphicalEffects
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as OrbitTheme
 import qs.Ui
 
 PopupCard {
@@ -51,9 +52,9 @@ PopupCard {
           width: root.cardWidth
           height: 182
           radius: 8
-          color: Qt.alpha(Color.popups.text, cardMouse.containsMouse ? 0.12 : 0.045)
+          color: Qt.alpha(OrbitTheme.Color.popups.text, cardMouse.containsMouse ? 0.12 : 0.045)
           border.width: 1
-          border.color: Qt.alpha(Color.popups.text, cardMouse.containsMouse ? 0.28 : 0.09)
+          border.color: Qt.alpha(OrbitTheme.Color.popups.text, cardMouse.containsMouse ? 0.28 : 0.09)
 
           MouseArea {
             id: cardMouse
@@ -81,7 +82,7 @@ PopupCard {
               width: card.width - 77
               text: card.client.title || (root.task ? root.task.name : "Window")
               textFormat: Text.PlainText
-              color: Color.popups.text
+              color: OrbitTheme.Color.popups.text
               font.pixelSize: 12
               elide: Text.ElideRight
             }
@@ -97,7 +98,7 @@ PopupCard {
               anchors.centerIn: parent
               text: "×"
               font.pixelSize: 21
-              color: Color.popups.text
+              color: OrbitTheme.Color.popups.text
             }
             MouseArea {
               id: closeMouse
@@ -150,7 +151,7 @@ PopupCard {
               Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: card.minimized ? "Minimized" : "Preview unavailable"
-                color: Qt.alpha(Color.popups.text, 0.7)
+                color: Qt.alpha(OrbitTheme.Color.popups.text, 0.7)
                 font.pixelSize: 11
               }
             }
@@ -175,7 +176,7 @@ PopupCard {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         text: (Math.min(root.page, root.pageCount - 1) * root.pageSize + 1) + "–" + Math.min((Math.min(root.page, root.pageCount - 1) + 1) * root.pageSize, root.windows.length) + " of " + root.windows.length + " windows"
-        color: Color.popups.text
+        color: OrbitTheme.Color.popups.text
         font.pixelSize: 12
       }
       Button {

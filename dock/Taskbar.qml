@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
+import qs.Commons as OrbitTheme
 import qs.Ui
 
 // Windows-style taskbar for the Omarchy bar.
@@ -192,7 +193,7 @@ Item {
 
   readonly property int barSize: bar ? bar.barSize : Style.bar.sizeHorizontal
   readonly property int iconExtent: Math.round(barSize * 0.55)
-  readonly property color foreground: bar ? bar.barForeground : Color.foreground
+  readonly property color foreground: bar ? bar.barForeground : OrbitTheme.Color.foreground
 
   implicitWidth: taskRow.implicitWidth
   implicitHeight: barSize
@@ -1118,7 +1119,7 @@ Item {
         readonly property bool urgent: taskbar.taskIsUrgent(task)
         readonly property color tileColor: {
           if (urgent)
-            return Qt.alpha(taskbar.bar ? taskbar.bar.urgent : Color.urgent, 0.24)
+            return Qt.alpha(taskbar.bar ? taskbar.bar.urgent : OrbitTheme.Color.urgent, 0.24)
           if (tooltipHovered)
             return Qt.alpha(taskbar.foreground, focused ? 0.24 : (running ? 0.18 : 0.12))
           if (focused)
@@ -1160,7 +1161,7 @@ Item {
           anchors.margins: 4
           radius: 8
           // Opaque front card keeps the two rear cards visible only at edges.
-          color: taskButton.rearCards > 0 ? Qt.tint(Color.background, taskButton.tileColor) : taskButton.tileColor
+          color: taskButton.rearCards > 0 ? Qt.tint(OrbitTheme.Color.background, taskButton.tileColor) : taskButton.tileColor
 
           Behavior on color {
             ColorAnimation {
@@ -1294,7 +1295,7 @@ Item {
           Text {
             width: parent.width
             text: taskbar.contextTask ? taskbar.contextTask.name : "Application"
-            color: Color.popups.text
+            color: OrbitTheme.Color.popups.text
             font.family: taskbar.bar ? taskbar.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.body
             font.bold: true
@@ -1305,7 +1306,7 @@ Item {
             width: parent.width
             readonly property int windowCount: taskbar.contextTask && taskbar.contextTask.windows instanceof Array ? taskbar.contextTask.windows.length : 0
             text: windowCount === 0 ? "Not running" : (windowCount === 1 ? "1 window" : windowCount + " windows")
-            color: Qt.alpha(Color.popups.text, 0.68)
+            color: Qt.alpha(OrbitTheme.Color.popups.text, 0.68)
             font.family: taskbar.bar ? taskbar.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -1313,7 +1314,7 @@ Item {
       }
 
       PanelSeparator {
-        foreground: Color.popups.text
+        foreground: OrbitTheme.Color.popups.text
       }
 
       Button {
@@ -1322,7 +1323,7 @@ Item {
         leftAlign: true
         iconText: "\uf067"
         text: "Open new window"
-        foreground: Color.popups.text
+        foreground: OrbitTheme.Color.popups.text
         fontSize: Style.font.bodySmall
         iconSize: Style.font.bodySmall
         onClicked: {
@@ -1338,7 +1339,7 @@ Item {
         opacity: enabled ? 1.0 : 0.45
         iconText: "\uf08d"
         text: taskbar.contextTask && taskbar.taskPinIndex(taskbar.contextTask, taskbar.configuredPins()) >= 0 ? "Unpin from taskbar" : "Pin to taskbar"
-        foreground: Color.popups.text
+        foreground: OrbitTheme.Color.popups.text
         fontSize: Style.font.bodySmall
         iconSize: Style.font.bodySmall
         onClicked: if (enabled)
@@ -1347,7 +1348,7 @@ Item {
 
       PanelSeparator {
         visible: taskbar.contextTask && taskbar.contextTask.windows instanceof Array && taskbar.contextTask.windows.length > 0
-        foreground: Color.popups.text
+        foreground: OrbitTheme.Color.popups.text
       }
 
       Button {
@@ -1356,7 +1357,7 @@ Item {
         leftAlign: true
         iconText: "\uf2ed"
         text: taskbar.contextTask && taskbar.contextTask.windows.length > 1 ? "Close all windows" : "Close window"
-        foreground: Color.popups.text
+        foreground: OrbitTheme.Color.popups.text
         fontSize: Style.font.bodySmall
         iconSize: Style.font.bodySmall
         onClicked: taskbar.closeTaskWindows(taskbar.contextTask)

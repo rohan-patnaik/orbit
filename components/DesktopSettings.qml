@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as OrbitTheme
 
 Flickable {
   id: root
@@ -34,7 +35,7 @@ Flickable {
       visible: root.errorMessage !== ""
       text: root.errorMessage
       wrapMode: Text.WordWrap
-      color: Color.menu.text
+      color: OrbitTheme.Color.menu.text
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.caption
     }

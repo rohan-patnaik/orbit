@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as OrbitTheme
 import "../SwitcherLogic.js" as Logic
 
 PanelWindow {
@@ -40,9 +41,9 @@ PanelWindow {
     width: root.cardGeometry.width
     height: root.cardGeometry.height
     radius: Style.cornerRadius * 2
-    color: Color.menu.background
+    color: OrbitTheme.Color.menu.background
     border.width: 1
-    border.color: Color.accent
+    border.color: OrbitTheme.Color.accent
 
     Text {
       anchors {
@@ -51,7 +52,7 @@ PanelWindow {
         horizontalCenter: parent.horizontalCenter
       }
       text: "Orbit · Drop onto a zone"
-      color: Color.menu.text
+      color: OrbitTheme.Color.menu.text
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.body
       font.bold: true
@@ -75,7 +76,7 @@ PanelWindow {
         horizontalCenter: parent.horizontalCenter
       }
       text: "Maximized = Super + Alt + F · Fullscreen = Super + F · Esc cancels"
-      color: Color.menu.text
+      color: OrbitTheme.Color.menu.text
       opacity: 0.65
       font.family: Style.font.menuFamily
       font.pixelSize: Style.font.caption

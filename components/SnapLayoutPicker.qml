@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as OrbitTheme
 
 Grid {
   id: root
@@ -53,9 +54,9 @@ Grid {
       width: Style.space(136)
       height: Style.space(108)
       radius: Style.cornerRadius
-      color: Color.background
+      color: OrbitTheme.Color.background
       border.width: root.selectedLayout === index ? 2 : 1
-      border.color: root.selectedLayout === index ? Color.accent : Color.menu.border
+      border.color: root.selectedLayout === index ? OrbitTheme.Color.accent : OrbitTheme.Color.menu.border
 
       Item {
         id: layoutCanvas
@@ -85,9 +86,9 @@ Grid {
             width: modelData.width * layoutCanvas.width - Style.space(4)
             height: modelData.height * layoutCanvas.height - Style.space(4)
             radius: Math.max(2, Style.cornerRadius - Style.space(4))
-            color: selected || hoverHandler.hovered ? Qt.alpha(Color.accent, selected ? 0.62 : 0.36) : Qt.alpha(Color.menu.text, 0.13)
+            color: selected || hoverHandler.hovered ? Qt.alpha(OrbitTheme.Color.accent, selected ? 0.62 : 0.36) : Qt.alpha(OrbitTheme.Color.menu.text, 0.13)
             border.width: selected ? 2 : 1
-            border.color: selected ? Color.accent : Qt.alpha(Color.menu.text, 0.25)
+            border.color: selected ? OrbitTheme.Color.accent : Qt.alpha(OrbitTheme.Color.menu.text, 0.25)
 
             HoverHandler {
               id: hoverHandler
@@ -113,7 +114,7 @@ Grid {
           horizontalCenter: parent.horizontalCenter
         }
         text: String(layoutTile.layoutData.label || "Layout")
-        color: Color.menu.text
+        color: OrbitTheme.Color.menu.text
         opacity: 0.72
         font.family: Style.font.menuFamily
         font.pixelSize: Style.font.caption

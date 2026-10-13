@@ -36,3 +36,7 @@ regression tests initial visibility, unload/re-enable, popup-owner identity and
 plugin disablement. Standard plugin, QML and formatting gates remain in
 `scripts/check.sh`. The live integration and recording results are recorded
 separately; a desktop recording is a feature demonstration, not a latency benchmark.
+
+Theme references are explicitly qualified so Qt 6.12's new `QtQuick.Color`
+singleton cannot shadow Omarchy's `qs.Commons.Color`. Offscreen lifecycle tests
+use isolated theme fixtures and exercise the actual preview components.

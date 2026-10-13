@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as OrbitTheme
 
 Item {
   id: root
@@ -76,9 +77,9 @@ Item {
           width: root.tileWidth
           height: root.tileHeight
           radius: Style.cornerRadius
-          color: selected ? Color.menu.selectedBackground : (hoverHandler.hovered ? Qt.alpha(Color.menu.text, 0.08) : "transparent")
+          color: selected ? OrbitTheme.Color.menu.selectedBackground : (hoverHandler.hovered ? Qt.alpha(OrbitTheme.Color.menu.text, 0.08) : "transparent")
           border.width: selected ? 2 : 1
-          border.color: selected ? Color.accent : Qt.alpha(Color.menu.border, 0.55)
+          border.color: selected ? OrbitTheme.Color.accent : Qt.alpha(OrbitTheme.Color.menu.border, 0.55)
           scale: selected ? 1 : 0.96
 
           Behavior on scale {
@@ -112,7 +113,7 @@ Item {
             anchors.rightMargin: Style.space(6)
             text: tile.modelData.label
             textFormat: Text.PlainText
-            color: tile.selected ? Color.menu.selectedText : Color.menu.text
+            color: tile.selected ? OrbitTheme.Color.menu.selectedText : OrbitTheme.Color.menu.text
             horizontalAlignment: Text.AlignHCenter
             elide: Text.ElideRight
             maximumLineCount: 1

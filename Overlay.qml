@@ -4,6 +4,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as OrbitTheme
 import "components"
 import "SwitcherLogic.js" as Logic
 
@@ -1772,7 +1773,7 @@ Item {
 
       Rectangle {
         anchors.fill: parent
-        color: Color.menu.scrim
+        color: OrbitTheme.Color.menu.scrim
 
         TapHandler {
           onTapped: root.closeManager()
@@ -1786,9 +1787,9 @@ Item {
         width: root.managerMode === "settings" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(620)) : root.managerMode === "snap" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(640)) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
         height: root.managerMode === "settings" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(730)) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(360)
         radius: Style.cornerRadius * 2
-        color: root.managerMode === "settings" ? Qt.alpha(Color.menu.background, 1) : Color.menu.background
+        color: root.managerMode === "settings" ? Qt.alpha(OrbitTheme.Color.menu.background, 1) : OrbitTheme.Color.menu.background
         border.width: 1
-        border.color: Color.menu.border
+        border.color: OrbitTheme.Color.menu.border
         focus: true
 
         Keys.onPressed: event => {
@@ -1832,7 +1833,7 @@ Item {
             horizontalCenter: parent.horizontalCenter
           }
           text: root.managerMode === "settings" ? "Orbit · Desktop controls" : root.managerMode === "assist" ? "Orbit · Snap Assist" : "Orbit · Snap layouts"
-          color: Color.menu.text
+          color: OrbitTheme.Color.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
           font.bold: true
@@ -1877,7 +1878,7 @@ Item {
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
               text: "Arrows choose · Enter snaps · Esc cancels"
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.55
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
@@ -1913,7 +1914,7 @@ Item {
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               horizontalAlignment: Text.AlignHCenter
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.65
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
@@ -1995,7 +1996,7 @@ Item {
             id: switcherScrim
 
             anchors.fill: parent
-            color: Color.menu.scrim
+            color: OrbitTheme.Color.menu.scrim
 
             TapHandler {
               onTapped: root.cancel()
@@ -2016,9 +2017,9 @@ Item {
             width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
             height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
             radius: Style.cornerRadius * 2
-            color: Color.menu.background
+            color: OrbitTheme.Color.menu.background
             border.width: 1
-            border.color: Color.menu.border
+            border.color: OrbitTheme.Color.menu.border
             focus: true
 
             Keys.onPressed: event => {
@@ -2070,7 +2071,7 @@ Item {
               anchors.topMargin: Style.space(18)
               anchors.horizontalCenter: parent.horizontalCenter
               text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.body
               font.bold: true
@@ -2151,7 +2152,7 @@ Item {
               width: Math.min(parent.width - Style.space(48), Style.space(620))
               text: root.entries[root.selectedIndex] ? root.entries[root.selectedIndex].title : ""
               textFormat: Text.PlainText
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.72
               elide: Text.ElideRight
               horizontalAlignment: Text.AlignHCenter
@@ -2188,7 +2189,7 @@ Item {
             anchors.fill: parent
             z: 1000
             opacity: root.activationCommitInProgress && root.handoffNeedsCover && outgoingCapture.hasContent ? 1 : 0
-            color: Color.menu.background
+            color: OrbitTheme.Color.menu.background
             clip: true
 
             ScreencopyView {
