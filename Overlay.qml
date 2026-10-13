@@ -4,6 +4,7 @@ import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as OrbitTheme
 import "components"
 import "SwitcherLogic.js" as Logic
 
@@ -14,6 +15,9 @@ Item {
 
   property var shell: null
   property var manifest: null
+  property var features: Logic.defaultFeatures()
+  property var featuresDraft: Logic.defaultFeatures()
+  property string settingsError: ""
   property bool opened: false
   property bool pickerPresented: false
   property bool coverCaptureNeeded: false
@@ -65,6 +69,41 @@ Item {
   property var inputTrace: []
   property var lastHandoff: ({})
   property string managerMode: ""
+  property var savedPluginEntries: []
+  property bool settingsLoaded: false
+
+  FileView {
+    id: orbitSettingsFile
+    path: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+    watchChanges: true
+    printErrors: true
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        const config = JSON.parse(text())
+        root.savedPluginEntries = Array.isArray(config.plugins) ? config.plugins.filter(entry => entry && entry.id === root.pluginId) : []
+        root.settingsLoaded = true
+        if (!root.opened && root.managerMode === "") {
+          root.mode = root.configuredMode()
+          root.windowScope = root.configuredScope()
+          root.windowModes = root.configuredWindowModes()
+        }
+      } catch (error) {
+        console.warn("Orbit: could not read saved settings: " + error)
+      }
+    }
+  }
+
+  function configuration() {
+    // 4.0.3 provides a scoped shell facade. Read only our entry from the
+    // watched user file; writes still use the host's scoped settings API.
+    return root.settingsLoaded ? {
+      plugins: root.savedPluginEntries
+    } : root.shell && root.shell.shellConfig ? root.shell.shellConfig : {
+      plugins: []
+    }
+  }
+
   property var windowModes: Logic.defaultWindowModes()
   property var settingsDraft: Logic.defaultWindowModes()
   property var snapLayouts: Logic.availableSnapLayouts(root.windowModes)
@@ -268,7 +307,7 @@ Item {
   }
 
   function switcherScreen() {
-    const config = root.shell ? root.shell.shellConfig : null
+    const config = root.configuration()
     const monitors = []
     for (const monitor of Hyprland.monitors.values || [])
       monitors.push(monitor)
@@ -419,12 +458,13 @@ Item {
   }
 
   function presentPicker() {
-    if (root.opened && !root.activationCommitInProgress && root.releaseToActivate)
+    if (root.opened && Logic.enabledViews(root.features).length > 0 && !root.activationCommitInProgress && root.releaseToActivate)
       root.pickerPresented = true
   }
 
   function startSwitcher(activateOnRelease, modifier, direction, inputSource) {
     root.traceInput("start", direction)
+    root.features = root.configuredFeatures()
     root.mode = root.configuredMode()
     root.windowScope = root.configuredScope()
     root.windowModes = root.configuredWindowModes()
@@ -437,7 +477,7 @@ Item {
     root.pendingModifier = String(modifier || "")
     root.pendingDirection = direction
     root.queuedSteps = 0
-    root.pendingGestureReleased = false
+    root.pendingGestureReleased = Logic.enabledViews(root.features).length === 0
     root.pickerPresented = false
     root.coverCaptureNeeded = false
     root.switcherInputSource = inputSource || "global"
@@ -468,7 +508,9 @@ Item {
   function setMode(value) {
     const selected = root.entries[root.selectedIndex]
     const selectedAddress = selected ? selected.address : ""
-    const nextMode = Logic.normalizeMode(value)
+    if (!Logic.enabledViews(root.configuredFeatures()).includes(String(value)))
+      return root.mode
+    const nextMode = Logic.enabledMode(value, root.configuredFeatures())
     root.mode = nextMode
     const nextEntries = root.mode === "icons" ? Logic.applicationEntries(root.windows) : root.windows
     const matchingIndex = Logic.entryIndexForAddress(nextEntries, selectedAddress)
@@ -480,7 +522,7 @@ Item {
   }
 
   function currentPluginSettings() {
-    const config = root.shell ? root.shell.shellConfig : null
+    const config = root.configuration()
     const plugins = config && Array.isArray(config.plugins) ? config.plugins : []
     for (const plugin of plugins) {
       if (plugin && String(plugin.id || "") === root.pluginId)
@@ -493,26 +535,31 @@ Item {
 
   function persistPluginSettings(changes) {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function")
-      return
+      return false
     const next = root.currentPluginSettings()
     for (const key in changes)
       next[key] = changes[key]
     next.id = root.pluginId
-    root.shell.updateEntryInline(root.pluginId, next)
+    return root.shell.updateEntryInline(root.pluginId, next) === true
+  }
+
+  function configuredFeatures() {
+    const config = root.configuration()
+    return Logic.featuresFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
   function configuredMode() {
-    const config = root.shell ? root.shell.shellConfig : null
+    const config = root.configuration()
     return Logic.modeFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
   function configuredScope() {
-    const config = root.shell ? root.shell.shellConfig : null
+    const config = root.configuration()
     return Logic.scopeFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
   function configuredWindowModes() {
-    const config = root.shell ? root.shell.shellConfig : null
+    const config = root.configuration()
     return Logic.windowModesFromPluginEntries(config ? config.plugins : null, root.pluginId)
   }
 
@@ -535,7 +582,14 @@ Item {
       return
     root.windowModes = root.configuredWindowModes()
     root.settingsDraft = Logic.normalizedWindowModes(root.windowModes)
+    root.featuresDraft = root.configuredFeatures()
+    root.settingsError = ""
     root.managerMode = "settings"
+  }
+
+  function toggleSettingsFeature(key) {
+    root.featuresDraft = Logic.toggledFeature(root.featuresDraft, String(key))
+    root.settingsError = ""
   }
 
   function toggleSettingsMode(mode) {
@@ -551,12 +605,25 @@ Item {
   }
 
   function applyWindowModeSettings() {
-    root.windowModes = Logic.normalizedWindowModes(root.settingsDraft)
-    root.persistPluginSettings({
-      windowModes: root.windowModes
-    })
+    const nextModes = Logic.normalizedWindowModes(root.settingsDraft)
+    const nextFeatures = Logic.normalizedFeatures(root.featuresDraft)
+    const nextMode = Logic.enabledMode(root.mode, nextFeatures)
+    const reloadBindings = JSON.stringify(root.configuredWindowModes()) !== JSON.stringify(nextModes)
+    if (!root.persistPluginSettings({
+      windowModes: nextModes,
+      features: nextFeatures,
+      mode: nextMode
+    })) {
+      root.settingsError = "Could not save Orbit settings. Please try again."
+      return false
+    }
+    root.windowModes = nextModes
+    root.features = nextFeatures
+    root.mode = nextMode
     root.managerMode = ""
-    settingsReload.running = true
+    if (reloadBindings)
+      settingsReload.running = true
+    return true
   }
 
   function closeManager() {
@@ -1706,7 +1773,7 @@ Item {
 
       Rectangle {
         anchors.fill: parent
-        color: Color.menu.scrim
+        color: OrbitTheme.Color.menu.scrim
 
         TapHandler {
           onTapped: root.closeManager()
@@ -1717,12 +1784,12 @@ Item {
         id: managerCard
 
         anchors.centerIn: parent
-        width: root.managerMode === "settings" ? Style.space(560) : root.managerMode === "snap" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(640)) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
-        height: root.managerMode === "settings" ? Style.space(490) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(360)
+        width: root.managerMode === "settings" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(620)) : root.managerMode === "snap" ? Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(640)) : Math.min(managerPanel.width - Style.gapsOut * 2, Style.space(560))
+        height: root.managerMode === "settings" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(730)) : root.managerMode === "assist" ? Math.min(managerPanel.height - Style.gapsOut * 2, Style.space(570)) : Style.space(360)
         radius: Style.cornerRadius * 2
-        color: Color.menu.background
+        color: root.managerMode === "settings" ? Qt.alpha(OrbitTheme.Color.menu.background, 1) : OrbitTheme.Color.menu.background
         border.width: 1
-        border.color: Color.menu.border
+        border.color: OrbitTheme.Color.menu.border
         focus: true
 
         Keys.onPressed: event => {
@@ -1765,8 +1832,8 @@ Item {
             topMargin: Style.space(18)
             horizontalCenter: parent.horizontalCenter
           }
-          text: root.managerMode === "settings" ? "Orbit · Window modes" : root.managerMode === "assist" ? "Orbit · Snap Assist" : "Orbit · Snap layouts"
-          color: Color.menu.text
+          text: root.managerMode === "settings" ? "Orbit · Desktop controls" : root.managerMode === "assist" ? "Orbit · Snap Assist" : "Orbit · Snap layouts"
+          color: OrbitTheme.Color.menu.text
           font.family: Style.font.menuFamily
           font.pixelSize: Style.font.body
           font.bold: true
@@ -1811,7 +1878,7 @@ Item {
             Text {
               anchors.horizontalCenter: parent.horizontalCenter
               text: "Arrows choose · Enter snaps · Esc cancels"
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.55
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
@@ -1822,9 +1889,12 @@ Item {
         Component {
           id: settingsComponent
 
-          WindowModeSettings {
+          DesktopSettings {
             width: parent ? parent.width : 0
             modes: root.settingsDraft
+            features: root.featuresDraft
+            errorMessage: root.settingsError
+            onFeatureRequested: key => root.toggleSettingsFeature(key)
             onToggleRequested: mode => root.toggleSettingsMode(mode)
             onDefaultRequested: mode => root.setSettingsDefault(mode)
             onApplyRequested: root.applyWindowModeSettings()
@@ -1844,7 +1914,7 @@ Item {
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               horizontalAlignment: Text.AlignHCenter
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.65
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.caption
@@ -1926,7 +1996,7 @@ Item {
             id: switcherScrim
 
             anchors.fill: parent
-            color: Color.menu.scrim
+            color: OrbitTheme.Color.menu.scrim
 
             TapHandler {
               onTapped: root.cancel()
@@ -1947,9 +2017,9 @@ Item {
             width: Math.min(panel.width - Style.gapsOut * 2, Math.max(Style.space(360), viewLoader.width + Style.space(40)))
             height: Math.min(panel.height - Style.gapsOut * 2, viewLoader.height + Style.space(144))
             radius: Style.cornerRadius * 2
-            color: Color.menu.background
+            color: OrbitTheme.Color.menu.background
             border.width: 1
-            border.color: Color.menu.border
+            border.color: OrbitTheme.Color.menu.border
             focus: true
 
             Keys.onPressed: event => {
@@ -2001,7 +2071,7 @@ Item {
               anchors.topMargin: Style.space(18)
               anchors.horizontalCenter: parent.horizontalCenter
               text: "Orbit · " + (root.mode === "grid" ? "Grid" : root.mode === "flip" ? "Flip" : "Icons")
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               font.family: Style.font.menuFamily
               font.pixelSize: Style.font.body
               font.bold: true
@@ -2071,6 +2141,7 @@ Item {
               anchors.bottomMargin: Style.space(39)
               anchors.horizontalCenter: parent.horizontalCenter
               currentMode: root.mode
+              features: root.configuredFeatures()
               onModeRequested: mode => root.setMode(mode)
             }
 
@@ -2081,7 +2152,7 @@ Item {
               width: Math.min(parent.width - Style.space(48), Style.space(620))
               text: root.entries[root.selectedIndex] ? root.entries[root.selectedIndex].title : ""
               textFormat: Text.PlainText
-              color: Color.menu.text
+              color: OrbitTheme.Color.menu.text
               opacity: 0.72
               elide: Text.ElideRight
               horizontalAlignment: Text.AlignHCenter
@@ -2118,7 +2189,7 @@ Item {
             anchors.fill: parent
             z: 1000
             opacity: root.activationCommitInProgress && root.handoffNeedsCover && outgoingCapture.hasContent ? 1 : 0
-            color: Color.menu.background
+            color: OrbitTheme.Color.menu.background
             clip: true
 
             ScreencopyView {

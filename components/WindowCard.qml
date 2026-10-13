@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell.Wayland
 import qs.Commons
+import qs.Commons as OrbitTheme
 
 Rectangle {
   id: root
@@ -15,9 +16,9 @@ Rectangle {
   signal activateRequested(int index)
 
   radius: Style.cornerRadius
-  color: root.selected ? Color.menu.selectedBackground : Color.background
+  color: root.selected ? OrbitTheme.Color.menu.selectedBackground : OrbitTheme.Color.background
   border.width: root.selected ? 2 : 1
-  border.color: root.selected ? Color.accent : Color.menu.border
+  border.color: root.selected ? OrbitTheme.Color.accent : OrbitTheme.Color.menu.border
   clip: true
 
   Rectangle {
@@ -32,7 +33,7 @@ Rectangle {
       bottomMargin: Style.space(6)
     }
     radius: Math.max(2, Style.cornerRadius - Style.space(3))
-    color: Qt.alpha(Color.menu.text, 0.05)
+    color: Qt.alpha(OrbitTheme.Color.menu.text, 0.05)
     clip: true
 
     AppIcon {
@@ -65,7 +66,7 @@ Rectangle {
       bottom: parent.bottom
     }
     height: Style.space(38)
-    color: root.selected ? Qt.alpha(Color.accent, 0.16) : "transparent"
+    color: root.selected ? Qt.alpha(OrbitTheme.Color.accent, 0.16) : "transparent"
 
     AppIcon {
       id: headerIcon
@@ -88,7 +89,7 @@ Rectangle {
       }
       text: root.windowData ? root.windowData.label : ""
       textFormat: Text.PlainText
-      color: root.selected ? Color.menu.selectedText : Color.menu.text
+      color: root.selected ? OrbitTheme.Color.menu.selectedText : OrbitTheme.Color.menu.text
       elide: Text.ElideRight
       maximumLineCount: 1
       font.family: Style.font.menuFamily

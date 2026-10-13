@@ -14,9 +14,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Install native test dependencies
-        run: pacman -Syu --noconfirm --needed git gcc lua quickshell
+        run: pacman -Syu --noconfirm --needed git gcc lua quickshell python pyside6 qt6-5compat
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: 24
       - run: node --test tests/*.test.cjs
+      - run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -p "test_*.py" -v

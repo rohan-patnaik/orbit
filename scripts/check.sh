@@ -5,6 +5,7 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 omarchy plugin validate "$project_dir"
 node --test "$project_dir"/tests/*.test.cjs
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$project_dir/tests" -p "test_*.py" -v
 
 mapfile -t qml_files < <(find "$project_dir" -type f -name '*.qml' -not -path '*/.git/*' | sort)
 if ((${#qml_files[@]} > 0)); then

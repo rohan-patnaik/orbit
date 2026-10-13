@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as OrbitTheme
 import "../SwitcherLogic.js" as Logic
 
 Item {
@@ -59,7 +60,7 @@ Item {
     anchors.topMargin: Style.space(6)
     anchors.horizontalCenter: parent.horizontalCenter
     text: (Math.floor(root.selectedIndex / root.pageSize) + 1) + " / " + Math.ceil(root.windows.length / root.pageSize)
-    color: Color.menu.text
+    color: OrbitTheme.Color.menu.text
     opacity: 0.6
     font.family: Style.font.menuFamily
     font.pixelSize: Style.font.caption
