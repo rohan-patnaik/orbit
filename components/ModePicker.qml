@@ -5,13 +5,18 @@ Row {
   id: root
 
   property string currentMode: "grid"
+  property var features: ({
+      grid: true,
+      flip: true,
+      icons: true
+    })
 
   signal modeRequested(string mode)
 
   spacing: Style.space(6)
 
   Repeater {
-    model: ["icons", "flip", "grid"]
+    model: ["icons", "flip", "grid"].filter(mode => root.features[mode] !== false)
 
     Rectangle {
       id: pill
@@ -30,7 +35,7 @@ Row {
 
       Text {
         anchors.centerIn: parent
-        text: (pill.index + 1) + "  " + String(pill.modelData).charAt(0).toUpperCase() + String(pill.modelData).slice(1)
+        text: (["icons", "flip", "grid"].indexOf(pill.modelData) + 1) + "  " + String(pill.modelData).charAt(0).toUpperCase() + String(pill.modelData).slice(1)
         color: pill.selected ? Color.menu.selectedText : Color.menu.text
         opacity: pill.selected || hoverHandler.hovered ? 1 : 0.68
         font.family: Style.font.menuFamily

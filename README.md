@@ -1,11 +1,13 @@
 # Omarchy Orbit
 
-Orbit is a native Omarchy Quattro overlay for switching between windows visible across
-all connected monitors. All three views keep separate windows from the same application
+Orbit provides a native Omarchy Quattro application dock and visual window switching
+across connected monitors. All three views keep separate windows from the same application
 as separate entries. Browser tabs are outside the plugin's scope.
 
 ## At a glance
 
+- Keep a familiar application dock with pins, running apps, hover previews, minimize/restore and saved ordering.
+- Toggle the dock, Grid, Flip and Icons independently in **Super+Shift+Z → Desktop controls**. All three views start enabled.
 - Switch the windows on every connected monitor from one focused, keyboard-first overlay.
 - Choose **Grid**, **Flip**, or **Icons**—each designed to keep individual windows visible and recognisable.
 - Use **Snap Layouts** and **Snap Assist** to place windows quickly without leaving the keyboard.
@@ -166,6 +168,54 @@ also use this bridge. It does not record typed text.
 Orbit replaces Omarchy's stock `Alt+Tab` bindings. The stock direct window
 cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
 
+## Dock and view controls
+
+Orbit 0.7.0 bundles the application dock previously maintained separately for
+this desktop. The dock groups running windows, resolves installed application
+icons, supports hover previews, pin/unpin and drag ordering, and minimizes or
+restores an application. Running and minimized windows from normal workspaces
+on connected displays remain available; utility/special windows stay excluded.
+
+Place it once after installing/enabling Orbit:
+
+```bash
+python3 ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/install-dock.py --backup-dir /path/to/recovery
+```
+
+Choose your recovery directory first. `--dry-run` prints the planned bar layout.
+An existing `taskbar` entry keeps its pins, ordering, position and other settings;
+only its component source changes. A new dock is added to the center without
+removing other widgets. The clock, tray and other bar widgets stay independent.
+The native bridge is optional and does not need rebuilding for this update.
+
+**Super+Shift+Z** opens **Desktop controls**. Its four independent checkboxes are
+**Application dock**, **Grid**, **Flip** and **Icons**. Press **Apply** to save.
+Turning the dock off unloads its widget and popups; turning it on recreates them
+without losing pins or ordering. The three visual views default to enabled,
+including existing installations whose settings have no `features` object.
+Disabled views are omitted from the picker and cannot be selected with 1/2/3.
+If a saved view is disabled, Orbit chooses an enabled one. All three can be off:
+Alt+Tab still uses Orbit's MRU activation/restoration with no visual picker.
+The window-mode controls below continue to configure Maximized, Floating,
+Tiled and Fullscreen independently.
+
+The saved plugin entry may contain:
+
+```json
+"features": { "dock": true, "grid": true, "flip": true, "icons": true }
+```
+
+Before removing Orbit, restore the previous dock component first:
+
+```bash
+python3 ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/install-dock.py --remove --backup-dir /path/to/recovery
+```
+
+This restores only the previous source/type and preserves current pins and
+ordering. If Orbit added a new dock, its settings are retained in
+`bar.orbitDockSettings` for a later reinstall. Installation backups are recovery
+evidence; do not replace a newer whole shell configuration with an old backup.
+
 ## Use
 
 - Press and hold `Alt`, then tap `Tab` to cycle forward. Release `Alt` to
@@ -179,8 +229,9 @@ cycling behavior remains available on `Super+Q` and `Super+Shift+Q`.
   with `Super`+left-drag to the top edge or a screen corner. Keep holding, move
   onto the desired zone, then release. Resize grips, text selection, and simply
   moving the pointer near an edge do not activate the picker.
-- Press `Super+Shift+Z` to choose the default launch mode and enabled window-mode
-  shortcuts. Changes take effect on the next window after Hyprland reloads.
+- Press `Super+Shift+Z` to toggle the dock/views and choose the default launch mode
+  and enabled window-mode shortcuts. Dock/view changes apply immediately; window-mode
+  policy changes reload bindings and set the next window's behavior.
 - Press `1`, `2`, or `3` to select Icons, Flip, or Grid. The choice is saved in
   `~/.config/omarchy/shell.json`.
 - Press Enter or Space, or click a window, to activate it.
@@ -201,6 +252,8 @@ omarchy-shell shell summon io.github.rohan-patnaik.window-switcher '{"action":"s
 ```
 
 ## Remove
+
+Run the dock removal command above before removing the plugin files.
 
 Remove the guarded include shown above from `~/.config/hypr/bindings.lua`, then
 run:
@@ -304,3 +357,5 @@ MIT
 The [0.6.4 compatibility notes](docs/RELEASE-0.6.4.md) cover web-app icons and
 extended taskbar minimize records. Taskbar icon ordering stays in the taskbar;
 Orbit retains MRU window switching.
+
+The [0.7.0 release notes](docs/RELEASE-0.7.0.md) describe the bundled dock, independent feature switches and migration.

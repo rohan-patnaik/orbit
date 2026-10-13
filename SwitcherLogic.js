@@ -281,12 +281,49 @@ function overlayMonitorName(entries, pluginId, monitors, focusedMonitorName) {
   return primaryMonitorName(monitors) || focused
 }
 
+function defaultFeatures() {
+  return { dock: true, grid: true, flip: true, icons: true }
+}
+
+function normalizedFeatures(value) {
+  var source = value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  var result = defaultFeatures()
+  for (var key of Object.keys(result))
+    if (typeof source[key] === "boolean") result[key] = source[key]
+  return result
+}
+
+function featuresFromPluginEntries(entries, pluginId) {
+  if (Array.isArray(entries)) {
+    for (var entry of entries)
+      if (entry && String(entry.id || "") === String(pluginId || ""))
+        return normalizedFeatures(entry.features)
+  }
+  return defaultFeatures()
+}
+
+function enabledViews(features) {
+  var flags = normalizedFeatures(features)
+  return ["grid", "flip", "icons"].filter(function(mode) { return flags[mode] })
+}
+
+function enabledMode(value, features) {
+  var modes = enabledViews(features)
+  var requested = normalizeMode(value)
+  return modes.includes(requested) ? requested : (modes[0] || "grid")
+}
+
+function toggledFeature(features, key) {
+  var next = normalizedFeatures(features)
+  if (Object.prototype.hasOwnProperty.call(next, key)) next[key] = !next[key]
+  return next
+}
+
 function modeFromPluginEntries(entries, pluginId) {
-  if (!Array.isArray(entries)) return "grid"
-  var id = String(pluginId || "")
-  for (var i = 0; i < entries.length; i++) {
-    if (entries[i] && String(entries[i].id || "") === id)
-      return normalizeMode(entries[i].mode)
+  if (Array.isArray(entries)) {
+    for (var entry of entries)
+      if (entry && String(entry.id || "") === String(pluginId || ""))
+        return enabledMode(entry.mode, featuresFromPluginEntries(entries, pluginId))
   }
   return "grid"
 }
