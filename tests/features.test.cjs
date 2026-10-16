@@ -6,9 +6,9 @@ const json = value => JSON.stringify(value);
 const app = { address: '0xa', class: 'firefox', monitor: 1, workspace: { id: 1 }, mapped: true, size: [800, 600], focusHistoryID: 0 };
 
 test('existing and fresh installations enable the dock and all three views', () => {
-  assert.deepEqual(JSON.parse(json(logic.featuresFromPluginEntries([], id))), { dock: true, grid: true, flip: true, icons: true });
+  assert.deepEqual(JSON.parse(json(logic.featuresFromPluginEntries([], id))), { dock: true, grid: true, flip: true, icons: true, taskManager: true });
   assert.deepEqual(Array.from(logic.enabledViews({ dock: false })), ['grid', 'flip', 'icons']);
-  assert.deepEqual(JSON.parse(json(logic.normalizedFeatures({ grid: 'false', flip: false, icons: null, unknown: false }))), { dock: true, grid: true, flip: false, icons: true });
+  assert.deepEqual(JSON.parse(json(logic.normalizedFeatures({ grid: 'false', flip: false, icons: null, unknown: false }))), { dock: true, grid: true, flip: false, icons: true, taskManager: true });
 });
 
 test('disabled saved view falls back to an enabled view; toggles are independent', () => {
@@ -69,4 +69,21 @@ test('watched scoped-facade preferences remain authoritative without shellConfig
   assert.equal(root.configuredMode(), 'flip');
   assert.equal(root.configuredScope(), 'all');
   assert.equal(root.currentPluginSettings().keep, 9);
+});
+
+
+test('Task Manager defaults on, toggles independently and persists without reload', () => {
+  const flags = logic.featuresFromPluginEntries([{ id, features: { dock: false } }], id);
+  assert.equal(flags.taskManager, true);
+  const next = logic.toggledFeature(flags, 'taskManager');
+  assert.equal(next.taskManager, false);
+  assert.equal(next.dock, false);
+  assert.deepEqual(JSON.parse(json(logic.enabledViews(next))), ['grid', 'flip', 'icons']);
+  const saved = [];
+  const { root, env } = overlay({ mode: 'grid', managerMode: 'settings', featuresDraft: next,
+    settingsDraft: logic.defaultWindowModes(), shell: { shellConfig: { plugins: [{ id }] },
+      updateEntryInline: (key, value) => { saved.push(value); return true; } } });
+  assert.equal(root.applyWindowModeSettings(), true);
+  assert.equal(saved[0].features.taskManager, false);
+  assert.notEqual(env.settingsReload.running, true);
 });

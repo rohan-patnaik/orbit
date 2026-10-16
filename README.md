@@ -7,7 +7,7 @@ as separate entries. Browser tabs are outside the plugin's scope.
 ## At a glance
 
 - Keep a familiar application dock with pins, running apps, hover previews, minimize/restore and saved ordering.
-- Toggle the dock, Grid, Flip and Icons independently in **Super+Shift+Z → Desktop controls**. All three views start enabled.
+- Toggle the dock, Task Manager, Grid, Flip and Icons independently in **Super+Shift+Z → Desktop controls**. All three views start enabled.
 - Switch the windows on every connected monitor from one focused, keyboard-first overlay.
 - Choose **Grid**, **Flip**, or **Icons**—each designed to keep individual windows visible and recognisable.
 - Use **Snap Layouts** and **Snap Assist** to place windows quickly without leaving the keyboard.
@@ -188,8 +188,8 @@ only its component source changes. A new dock is added to the center without
 removing other widgets. The clock, tray and other bar widgets stay independent.
 The native bridge is optional and does not need rebuilding for this update.
 
-**Super+Shift+Z** opens **Desktop controls**. Its four independent checkboxes are
-**Application dock**, **Grid**, **Flip** and **Icons**. Press **Apply** to save.
+**Super+Shift+Z** opens **Desktop controls**. Its five independent checkboxes are
+**Application dock**, **Grid**, **Flip**, **Icons** and **Task Manager**. Press **Apply** to save.
 Turning the dock off unloads its widget and popups; turning it on recreates them
 without losing pins or ordering. The three visual views default to enabled,
 including existing installations whose settings have no `features` object.
@@ -202,7 +202,7 @@ Tiled and Fullscreen independently.
 The saved plugin entry may contain:
 
 ```json
-"features": { "dock": true, "grid": true, "flip": true, "icons": true }
+"features": { "dock": true, "grid": true, "flip": true, "icons": true, "taskManager": true }
 ```
 
 Before removing Orbit, restore the previous dock component first:
@@ -348,7 +348,7 @@ The root `preview.png` is the marketplace cover for this plugin listing.
 The [0.6.2 release notes](docs/RELEASE-0.6.2.md) describe the patch and upgrade steps.
 The [performance validation](docs/PERFORMANCE-2026-09-05.md) records the measured
 latency, resource use, live regression checks, and remaining limits. Marketplace
-promotion is tracked separately in the [exact-commit update request](https://github.com/omacom/omarchy-plugin-marketplace/issues/4612).
+promotion is tracked separately in the [exact-commit update request](https://github.com/omacom/omarchy-plugin-marketplace/issues/11365).
 
 ## License
 
@@ -359,3 +359,42 @@ extended taskbar minimize records. Taskbar icon ordering stays in the taskbar;
 Orbit retains MRU window switching.
 
 The [0.7.0 release notes](docs/RELEASE-0.7.0.md) describe the bundled dock, independent feature switches and migration.
+
+
+## Task Manager (0.8.0)
+
+Orbit bundles a polished, current-theme Xfce Task Manager integration. After
+installing the official package with `omarchy pkg add xfce4-taskmanager`, the
+existing Orbit bindings include gives **Ctrl+Shift+Esc** its graphical task list.
+Reload Hyprland once after upgrading bindings. No native bridge rebuild is needed.
+
+**Super+Shift+Z → Desktop controls → Task Manager** defaults to on, including
+older configurations with no saved flag. Apply saves `features.taskManager`.
+Off means Ctrl+Shift+Esc opens btop. A disabled/unlisted Orbit entry, unreadable
+configuration, or missing Xfce application also uses btop. **Super+Ctrl+T** stays
+unchanged. Toggle changes take effect on the next launch without a shell reload
+and never terminate an already-open Task Manager or any other process.
+
+The bundled launcher seeds missing search/PID/state/CPU/memory columns while
+preserving saved display preferences, and enables termination confirmation.
+Use Terminate first; Kill only if necessary. Lifecycle colours mean starting,
+changing and terminating, not hung-app detection. Escape closes the main window.
+A frozen compositor may prevent any graphical shortcut; try Ctrl+Alt+F3 and an
+orderly reboot if a console responds. Orbit does not change drivers or power policy.
+
+The private GTK3 theme reads the active Omarchy semantic palette on every launch.
+Toolbar/search, headers, row spacing, selection, menus and dialogs support dark
+and light palettes. Native icon theme, lifecycle highlights and graph colours
+stay intact. No global GTK settings, vendor binary or system files are modified.
+Close/reopen an existing window after switching themes. If theme generation fails,
+Task Manager still opens using native GTK. Python 3 and Omarchy are runtime
+requirements; xfconf-query is supplied by the Xfce dependency chain. Install the
+optional package explicitly: store installation never elevates privileges or runs
+an installer hook. Without it, the working btop fallback remains available.
+
+The launcher can also be used directly:
+`python3 ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/task-manager.py`.
+Before removing Orbit, remove its bindings include and reload Hyprland. Integrators
+may route an Apps desktop entry to the same command; no additional daemon is needed.
+
+See [0.8.0 release notes](docs/RELEASE-0.8.0.md) for this update.

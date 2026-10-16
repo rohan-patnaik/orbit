@@ -10,7 +10,7 @@ Column {
   spacing: Style.space(8)
 
   Text {
-    text: "Dock and Alt+Tab views"
+    text: "Desktop features"
     color: OrbitTheme.Color.menu.text
     font.family: Style.font.menuFamily
     font.pixelSize: Style.font.body
@@ -39,6 +39,10 @@ Column {
         {
           key: "icons",
           label: "Icons"
+        },
+        {
+          key: "taskManager",
+          label: "Task Manager"
         }
       ]
 
@@ -94,6 +98,7 @@ Column {
         }
 
         TapHandler {
+          gesturePolicy: TapHandler.ReleaseWithinBounds
           onTapped: root.featureRequested(String(tile.modelData.key))
         }
       }
@@ -102,7 +107,7 @@ Column {
 
   Text {
     width: parent.width
-    text: "All three views are enabled by default. Turn them all off for direct Alt+Tab switching."
+    text: "Task Manager: Ctrl+Shift+Esc; off uses btop. All features start on. Turn all three views off for direct Alt+Tab switching."
     color: OrbitTheme.Color.menu.text
     opacity: 0.65
     wrapMode: Text.WordWrap

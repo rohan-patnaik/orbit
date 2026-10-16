@@ -133,3 +133,10 @@ end
 
 o.bind("SUPER + Z", "Orbit snap layouts", hl.dsp.global("omarchy-window-switcher:snap"))
 o.bind("SUPER + SHIFT + Z", "Orbit window modes", hl.dsp.global("omarchy-window-switcher:settings"))
+
+-- Read Orbit's feature preference at launch time; off/missing GUI uses btop.
+hl.unbind("CTRL + SHIFT + ESCAPE")
+o.bind("CTRL + SHIFT + ESCAPE", "Task Manager", "python3 " .. o.shell_quote(
+  (os.getenv("XDG_CONFIG_HOME") or ((os.getenv("HOME") or "") .. "/.config"))
+    .. "/omarchy/plugins/" .. orbit_plugin_id .. "/scripts/task-manager.py"
+))

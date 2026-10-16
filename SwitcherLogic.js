@@ -282,7 +282,7 @@ function overlayMonitorName(entries, pluginId, monitors, focusedMonitorName) {
 }
 
 function defaultFeatures() {
-  return { dock: true, grid: true, flip: true, icons: true }
+  return { dock: true, grid: true, flip: true, icons: true, taskManager: true }
 }
 
 function normalizedFeatures(value) {

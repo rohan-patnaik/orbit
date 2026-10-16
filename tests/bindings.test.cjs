@@ -76,3 +76,10 @@ test("invalid all-disabled policy recovers a maximized launch mode", () => {
   assert.ok(rows.some(row => row[0] === "rule" && row[1] === "maximize"));
   assert.ok(rows.some(row => row[0] === "bind" && row[1] === "SUPER + ALT + F"));
 });
+
+test("Task Manager shortcut replaces any prior binding and leaves btop shortcut alone", () => {
+  const rows = configured();
+  assert.ok(rows.some(row => row[0] === "unbind" && row[1] === "CTRL + SHIFT + ESCAPE"));
+  assert.ok(rows.some(row => row[0] === "bind" && row[1] === "CTRL + SHIFT + ESCAPE" && row[3].endsWith("/scripts/task-manager.py")));
+  assert.equal(rows.some(row => row[1] === "SUPER + CTRL + T"), false);
+});
