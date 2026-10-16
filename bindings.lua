@@ -86,6 +86,16 @@ elseif window_modes.default_mode == "maximized" then
   o.window({ class = ".*", float = false }, { maximize = true })
 end
 
+-- Task Manager is a movable utility, including when ordinary apps maximize.
+-- Static launch rules leave later user moves/resizes/fullscreen choices intact.
+o.window({ class = "^[Xx]fce4-taskmanager$", float = false }, {
+  float = true,
+  maximize = false,
+  fullscreen = false,
+  size = { "monitor_w * 0.6", "monitor_h * 0.7" },
+  center = true,
+})
+
 hl.unbind("ALT + TAB")
 hl.unbind("ALT + SHIFT + TAB")
 
@@ -117,9 +127,9 @@ hl.unbind("SUPER + ALT + F")
 if window_modes.tiled and window_modes.floating then
   o.bind("SUPER + T", "Toggle window floating/tiling", hl.dsp.window.float({ action = "toggle" }))
 elseif window_modes.tiled then
-  o.bind("SUPER + T", "Tile window", hl.dsp.window.float({ action = "unset" }))
+  o.bind("SUPER + T", "Tile window", hl.dsp.window.float({ action = "disable" }))
 elseif window_modes.floating then
-  o.bind("SUPER + T", "Float window", hl.dsp.window.float({ action = "set" }))
+  o.bind("SUPER + T", "Float window", hl.dsp.window.float({ action = "enable" }))
 end
 if window_modes.fullscreen then
   o.bind("SUPER + F", "Full screen", hl.dsp.window.fullscreen({ mode = "fullscreen" }))

@@ -40,6 +40,7 @@ def prepare_preferences():
     try:
         if query('/prompt-terminate-task', '--create', '-t', 'bool', '-s', 'true'):
             print('Could not save task termination confirmation preference.', file=sys.stderr)
+        query('/window-maximized', '--create', '-t', 'bool', '-s', 'false')
         for property in ('/interface/show-filter', '/columns/column-state',
                          '/columns/column-pid', '/columns/column-cpu', '/columns/column-rss'):
             if query(property):
@@ -60,6 +61,17 @@ def launch_command():
     except (OSError, subprocess.SubprocessError) as error:
         print(f'Task Manager theme unavailable: {error}', file=sys.stderr)
     command = ['xfce4-taskmanager']
+    # Adapt the installed GTK resource, retaining upstream widgets and signals.
+    try:
+        ui = subprocess.run([sys.executable, str(Path(__file__).with_name('task-manager-ui.py'))],
+                            capture_output=True, text=True, timeout=5)
+        overlay = (ui.stdout or '').strip() if ui.returncode == 0 else ''
+        if overlay:
+            command = ['env', 'G_RESOURCE_OVERLAYS=' + overlay, *command]
+        elif ui.stderr:
+            print(ui.stderr.strip(), file=sys.stderr)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f'Task Manager window controls unavailable: {error}', file=sys.stderr)
     if themed:
         command = ['env', 'GTK_THEME=OmarchyTaskManager', *command]
     # The standard Omarchy app scope retains normal session integration.

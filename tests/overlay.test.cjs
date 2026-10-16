@@ -102,7 +102,7 @@ test('drag is visible before release; exact dragged target survives focus change
   assert.equal(root.dragState.visible, true);
   assert.equal(root.managerMode, '');
   assert.equal(calls.length, 0, 'showing a preview must not change any real window');
-  env.dragLayer.item = { cardGeometry: { x: 600, y: 12, width: 640, height: 318 }, hitTest: () => ({ layout: 5, slot: 0 }) };
+  env.dragLayer.item = { cardGeometry: { x: 600, y: 12, width: 640, height: 318 }, hitTest: () => ({ layout: root.snapLayouts.findIndex(layout => layout.id === "maximized"), slot: 0 }) };
   root.handleDragEvent(json({ ...move, phase: 'end', x: 650, y: 250 }));
   assert.equal(root.dragState.visible, false);
   assert.equal(root.dragDropCount, 1);
@@ -134,7 +134,7 @@ test('release on another monitor cannot drop onto a stale picker', () => {
   const { root, env, calls } = overlay();
   const event = { protocol: 1, session: 1, phase: 'move', x: 600, y: 10, monitor: main, window: { address: '0xa' } };
   root.handleDragEvent(json(event));
-  env.dragLayer.item = { hitTest: () => ({ layout: 5, slot: 0 }) };
+  env.dragLayer.item = { hitTest: () => ({ layout: root.snapLayouts.findIndex(layout => layout.id === "maximized"), slot: 0 }) };
   root.handleDragEvent(json({ ...event, phase: 'end', monitor: laptop }));
   assert.equal(root.dragDropCount, 0);
   assert.equal(calls.length, 0);
@@ -363,4 +363,24 @@ test('activation restores a taskbar-minimized window exactly once before focusin
     hl.dsp.window.alter_zorder=function()return function()end end;
     ${script};assert(focused);${script};assert(moves==1 and pins==1 and states==1);
   `});
+});
+
+test('Floating exits fullscreen, centers a free window and removes snap group membership', () => {
+  const window = { address: '0xa', floating: false, fullscreenState: 2 };
+  const { root, calls } = overlay({ snapTargetWindow: window, snapTargetMonitor: main,
+    snapGroups: [{ addresses: ['0xa', '0xb'] }, { addresses: ['0xc'] }],
+    rememberedFullscreenStates: { '0xa': 2 }, managerMode: 'snap' });
+  const index = root.snapLayouts.findIndex(layout => layout.id === 'floating');
+  root.chooseSnapSlot(index, 0);
+  assert.equal(root.managerMode, '');
+  assert.equal(root.snapGroups.length, 1);
+  assert.equal(root.snapGroups[0].addresses[0], '0xc');
+  assert.equal(root.rememberedFullscreenStates['0xa'], undefined);
+  assert.ok(calls.some(c => c.includes('internal = 0, client = 0')));
+  assert.ok(calls.some(c => c.includes('window.float') && c.includes('action = "enable"')));
+  const geometry = root.snapGeometry(index, 0);
+  assert.ok(geometry.width < main.width * 0.7 && geometry.height < main.height * 0.8);
+  assert.ok(Math.abs(geometry.x + geometry.width / 2 - main.width / 2) <= 1);
+  assert.ok(Math.abs(geometry.y + geometry.height / 2 - main.height / 2) <= 1);
+  assert.ok(calls.findIndex(c => c.includes('window.resize')) < calls.findIndex(c => c.includes('window.move')));
 });

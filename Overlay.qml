@@ -780,7 +780,7 @@ Item {
     root.forgetRememberedFullscreen(address)
     Hyprland.dispatch('hl.dsp.window.set_prop({ prop = "no_anim", value = "true", window = "address:' + address + '" })')
     Hyprland.dispatch('hl.dsp.window.fullscreen_state({ internal = 0, client = 0, action = "set", window = "address:' + address + '" })')
-    Hyprland.dispatch('hl.dsp.window.float({ action = "set", window = "address:' + address + '" })')
+    Hyprland.dispatch('hl.dsp.window.float({ action = "enable", window = "address:' + address + '" })')
     // Hyprland keeps a floating window centered while resizing it. Resize first,
     // then apply the absolute position so the selected slot remains exact.
     Hyprland.dispatch('hl.dsp.window.resize({ x = ' + geometry.width + ', y = ' + geometry.height + ', relative = false, window = "address:' + address + '" })')
@@ -830,6 +830,12 @@ Item {
     }
     if (!root.snapWindow(root.snapTargetWindow, layoutIndex, slotIndex))
       return
+    if (layout.standalone) {
+      root.snapGroups = root.snapGroups.filter(group => !group.addresses.includes(root.snapTargetWindow.address))
+      root.managerMode = ""
+      snapFocusTimer.restart()
+      return
+    }
     const remaining = []
     for (let index = 0; index < layout.slots.length; index++) {
       if (index !== slotIndex)

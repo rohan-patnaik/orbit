@@ -52,9 +52,16 @@ class TaskManagerTests(unittest.TestCase):
         with patch.object(manager.shutil, 'which', return_value=True), patch.object(manager.subprocess, 'run', side_effect=run):
             manager.prepare_preferences()
         writes = [c for c in calls if '--create' in c]
-        self.assertEqual([c[4] for c in writes], ['/prompt-terminate-task', '/columns/column-state'])
-        self.assertTrue(all(c[-1] == 'true' for c in writes))
+        self.assertEqual([c[4] for c in writes], ['/prompt-terminate-task', '/window-maximized', '/columns/column-state'])
+        self.assertEqual([c[-1] for c in writes], ['true', 'false', 'true'])
 
     def test_palette_timeout_still_opens_gui(self):
         with patch.object(manager, 'configured', return_value=True), patch.object(manager.shutil, 'which', return_value=True), patch.object(manager, 'prepare_preferences'), patch.object(manager.subprocess, 'run', side_effect=subprocess.TimeoutExpired('theme', 15)):
             self.assertEqual(manager.launch_command(), ['uwsm-app', '--', 'xfce4-taskmanager'])
+
+    def test_native_controls_overlay_is_scoped_to_the_launched_app(self):
+        results = [subprocess.CompletedProcess([], 0),
+                   subprocess.CompletedProcess([], 0, stdout='/org/xfce/taskmanager/process-window=/data/ui\n')]
+        with patch.object(manager, 'configured', return_value=True), patch.object(manager.shutil, 'which', return_value=True), patch.object(manager, 'prepare_preferences'), patch.object(manager.subprocess, 'run', side_effect=results):
+            self.assertEqual(manager.launch_command(), ['uwsm-app', '--', 'env', 'GTK_THEME=OmarchyTaskManager',
+                'env', 'G_RESOURCE_OVERLAYS=/org/xfce/taskmanager/process-window=/data/ui', 'xfce4-taskmanager'])

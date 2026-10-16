@@ -363,6 +363,9 @@ function snapLayouts() {
       { x: 0, y: 0.5, width: 0.5, height: 0.5 },
       { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
     ] },
+    { id: "floating", label: "Floating", standalone: true, slots: [
+      { x: 0.2, y: 0.15, width: 0.6, height: 0.7 }
+    ] },
     { id: "maximized", label: "Maximized", action: "maximized", slots: [
       { x: 0, y: 0, width: 1, height: 1 }
     ] },

@@ -35,7 +35,7 @@ function configured(tsv = "", nativeBridge = false) {
         print("bind\\t" .. key .. "\\t" .. label .. "\\t" .. (type(action) == "table" and action.name or action) .. "\\t" .. (type(action) == "table" and (action.args.action or "") or ""))
       end,
       window=function(match, rules)
-        for key in pairs(rules) do print("rule\\t" .. key .. "\\t" .. tostring(type(match) == "table" and match.float)) end
+        for key, value in pairs(rules) do print("rule\\t" .. key .. "\\t" .. tostring(type(match) == "table" and match.float) .. "\\t" .. tostring(type(match) == "table" and match.class) .. "\\t" .. tostring(value)) end
       end
     }
     dofile(${JSON.stringify(path.join(__dirname, "..", "bindings.lua"))})
@@ -60,7 +60,7 @@ test("normal binding prefers ordered native events and falls back after bridge u
   assert.ok(rows.some(row => row[0] === "dispatch" && row[1] === "omarchy-window-switcher:next"));
 });
 test("default installation preserves tiling; personal maximized default excludes floating utilities", () => {
-  assert.equal(configured().filter(row => row[0] === "rule").length, 0);
+  assert.equal(configured().filter(row => row[0] === "rule" && row[2] === "false" && row[3] === ".*").length, 0);
   const personal = configured("maximized\ttrue\ttrue\ttrue\ttrue\ttrue");
   assert.ok(personal.some(row => row[0] === "rule" && row[1] === "maximize" && row[2] === "false"));
 });
@@ -69,7 +69,7 @@ test("mode shortcuts honor disabled options and retain an escape to the sole nor
   const binds = rows.filter(row => row[0] === "bind");
   assert.equal(binds.some(row => row[1] === "SUPER + F"), false);
   assert.equal(binds.some(row => row[1] === "SUPER + ALT + F"), false);
-  assert.ok(binds.some(row => row[1] === "SUPER + T" && row[4] === "unset"));
+  assert.ok(binds.some(row => row[1] === "SUPER + T" && row[4] === "disable"));
 });
 test("invalid all-disabled policy recovers a maximized launch mode", () => {
   const rows = configured("invalid\tfalse\tfalse\tfalse\tfalse\tfalse");
@@ -82,4 +82,13 @@ test("Task Manager shortcut replaces any prior binding and leaves btop shortcut 
   assert.ok(rows.some(row => row[0] === "unbind" && row[1] === "CTRL + SHIFT + ESCAPE"));
   assert.ok(rows.some(row => row[0] === "bind" && row[1] === "CTRL + SHIFT + ESCAPE" && row[3].endsWith("/scripts/task-manager.py")));
   assert.equal(rows.some(row => row[1] === "SUPER + CTRL + T"), false);
+});
+
+test("Task Manager floating exception follows the ordinary maximized launch rule", () => {
+  const rules = configured("maximized\ttrue\ttrue\ttrue\ttrue\ttrue").filter(r => r[0] === 'rule');
+  const ordinary = rules.findIndex(r => r[1] === 'maximize' && r[3] === '.*');
+  const utility = rules.findIndex(r => r[1] === 'maximize' && r[3] === '^[Xx]fce4-taskmanager$');
+  assert.ok(ordinary >= 0 && utility > ordinary);
+  assert.equal(rules[utility][4], 'false');
+  assert.ok(rules.some(r => r[1] === 'float' && r[3] === '^[Xx]fce4-taskmanager$' && r[4] === 'true'));
 });

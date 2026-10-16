@@ -62,6 +62,18 @@ window, .background, .background:backdrop, viewport, statusbar {
 *:backdrop { color: @tm_fg; }
 label:disabled, label:disabled:backdrop { color: @tm_dim; }
 
+/* Native draggable title bar; close is separate from the search field. */
+headerbar, headerbar:backdrop {
+  background-image: none; background-color: @tm_surface; color: @tm_strong;
+  border: none; box-shadow: none; min-height: 32px; padding: 4px 8px;
+}
+headerbar button.titlebutton {
+  background-image: none; background-color: transparent; color: @tm_fg;
+  border: none; box-shadow: none; min-width: 24px; min-height: 24px;
+}
+headerbar button.titlebutton:hover { background-color: @tm_hover; }
+headerbar button.titlebutton.close:hover { background-color: #c74b50; color: #ffffff; }
+
 /* Toolbar: a quiet band holding the search field */
 toolbar, toolbar:backdrop {
   background-color: @tm_surface; color: @tm_fg;
@@ -88,7 +100,8 @@ entry, entry:backdrop, spinbutton, spinbutton:backdrop {
 entry:focus, spinbutton:focus {
   border-color: @tm_accent; box-shadow: 0 0 0 1px alpha(@tm_accent, 0.35);
 }
-entry image { color: @tm_dim; }
+entry image { color: @tm_dim; -gtk-icon-style: symbolic; }
+entry image.right { color: #8a8a8a; -gtk-icon-transform: scale(0.8); }
 entry image:hover { color: @tm_fg; }
 entry selection, textview text selection {
   background-color: @tm_accent; color: @tm_on_accent;

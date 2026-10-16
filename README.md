@@ -364,7 +364,7 @@ The [0.7.0 release notes](docs/RELEASE-0.7.0.md) describe the bundled dock, inde
 ## Task Manager (0.8.0)
 
 Orbit bundles a polished, current-theme Xfce Task Manager integration. After
-installing the official package with `omarchy pkg add xfce4-taskmanager`, the
+installing the official package with `omarchy pkg add xfce4-taskmanager python-gobject`, the
 existing Orbit bindings include gives **Ctrl+Shift+Esc** its graphical task list.
 Reload Hyprland once after upgrading bindings. No native bridge rebuild is needed.
 
@@ -401,3 +401,32 @@ See [0.8.0 release notes](docs/RELEASE-0.8.0.md) for this update.
 
 The [0.8.1 patch](docs/RELEASE-0.8.1.md) also renders taskbar application metadata
 as literal plain text, addressing the marketplace context-menu review.
+
+
+### Floating windows and Task Manager controls (0.9.0)
+
+Super+Z → **Floating** makes the selected window a centered, freely movable
+window (60% width, 70% height of the usable output, respecting its scale).
+It leaves fullscreen/maximized mode and leaves any snap group. Drag its title
+bar or use Super+left-drag to move it; Super+right-drag resizes it. The Floating
+checkbox in Desktop controls controls this Snap Layouts option as well.
+
+Task Manager is a utility exception to ordinary maximized launches: it opens
+centered and floating at 60% monitor width and 70% monitor height. Its launch
+rule applies after the ordinary default, and its saved maximized flag is cleared
+at launch. It remains movable/resizable and can still be maximized explicitly.
+Existing open instances are left alone; close and reopen once to use the controls.
+
+Install `python-gobject` alongside `xfce4-taskmanager` for the native window
+controls (`omarchy pkg add xfce4-taskmanager python-gobject`). The launcher reads
+the installed ELF64 executable's GTK resource and creates an app-scoped GLib
+resource overlay under `$XDG_DATA_HOME/orbit/task-manager-ui`. It adds a native
+GTK title bar with a top-right close button and a small grey cross inside the
+search field. The search field uses GtkEntry with Xfce's existing changed and
+icon-press handlers, avoiding GtkSearchEntry replacing the cross with a themed
+backspace icon. This does not replace the package binary or change global GTK.
+An existing upstream title bar is retained; unknown layouts or missing optional
+bindings fall back to the vendor UI with a diagnostic. The theme still works.
+
+The top-right cross closes Task Manager; the search cross clears only the
+filter. Native process actions and termination confirmation remain unchanged.

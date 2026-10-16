@@ -159,14 +159,14 @@ test("Alt+Tab targets the primary display independently of the focused display",
   assert.equal(logic.overlayMonitorName([{ id, overlayMonitor: "missing" }], id, monitors, "eDP-1"), "HDMI-A-1");
 });
 
-test("snap layouts expose five arrangements plus Maximized and Fullscreen", () => {
+test("snap layouts expose five arrangements plus Floating, Maximized and Fullscreen", () => {
   const layouts = logic.snapLayouts();
-  assert.equal(layouts.length, 7);
+  assert.equal(layouts.length, 8);
   assert.equal(layouts[0].slots.length, 2);
   assert.equal(layouts[4].slots.length, 4);
   assert.equal(layouts.some(layout => layout.id === "main-left"), false);
-  assert.equal(layouts[5].action, "maximized");
-  assert.equal(layouts[6].action, "fullscreen");
+  assert.equal(layouts[6].action, "maximized");
+  assert.equal(layouts[7].action, "fullscreen");
   const left = logic.snapGeometry(layouts[0].slots[0], {
     x: -1280, y: 0, width: 1920, height: 1080, scale: 1.5,
     reserved: [0, 0, 0, 26]
