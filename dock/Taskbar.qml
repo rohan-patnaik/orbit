@@ -1200,6 +1200,7 @@ Item {
             anchors.centerIn: parent
             visible: appIcon.status === Image.Error || String(appIcon.source) === ""
             text: task ? task.fallbackText : "A"
+            textFormat: Text.PlainText
             color: taskbar.foreground
             font.family: taskbar.bar ? taskbar.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -1295,6 +1296,7 @@ Item {
           Text {
             width: parent.width
             text: taskbar.contextTask ? taskbar.contextTask.name : "Application"
+            textFormat: Text.PlainText
             color: OrbitTheme.Color.popups.text
             font.family: taskbar.bar ? taskbar.bar.fontFamily : Style.font.family
             font.pixelSize: Style.font.body

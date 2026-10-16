@@ -398,3 +398,6 @@ Before removing Orbit, remove its bindings include and reload Hyprland. Integrat
 may route an Apps desktop entry to the same command; no additional daemon is needed.
 
 See [0.8.0 release notes](docs/RELEASE-0.8.0.md) for this update.
+
+The [0.8.1 patch](docs/RELEASE-0.8.1.md) also renders taskbar application metadata
+as literal plain text, addressing the marketplace context-menu review.
