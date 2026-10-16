@@ -23,6 +23,7 @@ Item {
   property bool coverCaptureNeeded: false
   readonly property bool modifierPollingNeeded: root.opened && root.releaseToActivate && root.switcherInputSource !== "native"
   property bool releaseToActivate: false
+  property bool nativeReleaseCheckPending: false
   property string releaseModifier: ""
   property bool hoverArmed: false
   property point initialPointerPosition: Qt.point(-1, -1)
@@ -481,6 +482,7 @@ Item {
     root.pickerPresented = false
     root.coverCaptureNeeded = false
     root.switcherInputSource = inputSource || "global"
+    root.nativeReleaseCheckPending = false
     // A cancelled Process can still be delivering its old stdout. Drain that
     // generation before starting another query, never reuse its old snapshot.
     root.snapshotRestartPending = windowQuery.running
@@ -1018,12 +1020,16 @@ Item {
 
   function observeModifierState(text) {
     root.traceInput("modifier-poll", text.trim())
+    // Only the watchdog's own check may commit a native gesture; a late poll
+    // from an earlier gesture must not.
+    const nativeCheck = root.nativeReleaseCheckPending
+    root.nativeReleaseCheckPending = false
     if (!root.opened || !root.releaseToActivate)
       return
     const state = text.trim()
     if (state.endsWith("true"))
       watchdog.restart()
-    else if (state.endsWith("false") && root.switcherInputSource !== "native")
+    else if (state.endsWith("false") && (root.switcherInputSource !== "native" || nativeCheck))
       root.accept()
     // A failed IPC query is not proof the user released Alt. The watchdog
     // remains a bounded cancellation fallback if input reporting is broken.
@@ -1359,6 +1365,7 @@ Item {
     const selected = activate && root.selectedIndex >= 0 ? root.entries[root.selectedIndex] : null
     pickerPresentationTimer.stop()
     watchdog.stop()
+    root.nativeReleaseCheckPending = false
     root.releaseToActivate = false
     root.releaseModifier = ""
     if (!selected) {
@@ -1674,11 +1681,25 @@ Item {
   Timer {
     id: watchdog
     interval: 10000
-    // The bridge delivers Alt-up/Escape in order. Holding Alt needs neither
-    // periodic subprocesses nor an expiry. Unload explicitly enables fallback.
+    // The bridge delivers Alt-up/Escape in order. Holding Alt needs no
+    // periodic polling nor an expiry. Unload explicitly enables fallback.
+    // A release lost with an input device reset must not strand the picker,
+    // so an idle native hold checks the real modifier once per period.
     onTriggered: {
-      if (root.switcherInputSource !== "native" || !root.releaseToActivate)
+      if (root.switcherInputSource !== "native" || !root.releaseToActivate) {
         root.cancel()
+      } else if (!nativeReleaseCheck.running) {
+        root.nativeReleaseCheckPending = true
+        nativeReleaseCheck.running = true
+      }
+    }
+  }
+
+  Process {
+    id: nativeReleaseCheck
+    command: ["hyprctl", "eval", root.releaseModifierExpression()]
+    stdout: StdioCollector {
+      onStreamFinished: root.observeModifierState(text)
     }
   }
 

@@ -87,7 +87,33 @@ test('the real watchdog callback permits a long native hold and still cancels br
     const { root, env } = overlay({ opened: true, releaseToActivate: true, switcherInputSource: native ? 'native' : 'global' });
     vm.runInContext(`(function() {${block}})()`, env);
     assert.equal(root.opened, native);
+    assert.equal(env.nativeReleaseCheck.running === true, native);
   }
+});
+
+test('an idle native hold survives its watchdog check; a lost Alt release then commits', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../Overlay.qml'), 'utf8');
+  const block = source.match(/id: watchdog\n[\s\S]*?onTriggered: \{([\s\S]*?)\n    \}/)[1];
+  const { root, env } = overlay();
+  root.observeSwitcherStep('{"protocol":1,"step":1}');
+  root.completeWindowQuery(json(rows));
+  root.presentPicker();
+  let restarted = 0;
+  env.watchdog.restart = () => restarted++;
+  root.observeModifierState('error: false');
+  assert.equal(root.opened, true, 'an unsolicited poll cannot commit a native gesture');
+  vm.runInContext(`(function() {${block}})()`, env);
+  root.observeModifierState('error: true');
+  assert.equal(restarted, 1);
+  assert.equal(root.opened, true, 'Alt still held keeps the picker open');
+  env.nativeReleaseCheck.running = false;
+  vm.runInContext(`(function() {${block}})()`, env);
+  root.observeModifierState('error: connection failed');
+  assert.equal(root.opened, true, 'a failed query is not a release');
+  env.nativeReleaseCheck.running = false;
+  vm.runInContext(`(function() {${block}})()`, env);
+  root.observeModifierState('error: false');
+  assert.equal(root.pendingWindow.address, '0x2');
 });
 
 test('snapshot resolves duplicate application metadata only once, refreshes next time', () => {

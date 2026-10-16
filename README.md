@@ -379,8 +379,8 @@ The bundled launcher seeds missing search/PID/state/CPU/memory columns while
 preserving saved display preferences, and enables termination confirmation.
 Use Terminate first; Kill only if necessary. Lifecycle colours mean starting,
 changing and terminating, not hung-app detection. Escape closes the main window.
-A frozen compositor may prevent any graphical shortcut; try Ctrl+Alt+F3 and an
-orderly reboot if a console responds. Orbit does not change drivers or power policy.
+A frozen compositor may prevent any graphical shortcut; the optional
+[rescue keys](#rescue-keys) work below it. Orbit does not change drivers or power policy.
 
 The private GTK3 theme reads the active Omarchy semantic palette on every launch.
 Toolbar/search, headers, row spacing, selection, menus and dialogs support dark
@@ -430,3 +430,66 @@ bindings fall back to the vendor UI with a diagnostic. The theme still works.
 
 The top-right cross closes Task Manager; the search cross clears only the
 filter. Native process actions and termination confirmation remain unchanged.
+
+### Task Manager on every workspace (0.10.0)
+
+Task Manager now opens where you are. Configs that pin every new window to one
+workspace (for example a static `workspace = "1 silent"` rule) no longer send
+it, or its Terminate/Kill and Settings dialogs, elsewhere. A new dialog is
+raised and focused, so Enter and Esc work at once. GTK3 does not tell the
+compositor these dialogs are modal, so clicking the main window could bury a
+dialog that still owned input; Orbit now keeps the open dialog in front, as
+Windows does.
+
+Confirmation dialogs are a square raised panel with a border, and **Yes**, the
+destructive action, uses the palette red (a muted red when the theme has none).
+No stays the default. The process row menu opens with right-click, the Menu
+key, and now Shift+F10, which Xfce Task Manager ignored. Shift+F10 is not
+consumed for other apps.
+
+An idle Alt+Tab hold through the native bridge now checks the real Alt state
+once per 10-second watchdog period. A release lost to an input-device reset
+completes the switch instead of leaving the picker open; holding Alt still
+needs no polling.
+
+## Rescue keys
+
+Windows handles Ctrl+Alt+Del below every app, which is why it gets through
+when the desktop is wedged. Orbit can install an optional root service that
+does the same below Hyprland:
+
+| Keys | Action |
+| --- | --- |
+| **Ctrl+Alt+Shift+Esc** | Switch to a text-console rescue screen |
+| **Super+Ctrl+Shift+B** | Restart graphics, like Win+Ctrl+Shift+B |
+
+The rescue screen offers **Return to desktop**, **End a task** (your busiest
+apps first; Terminate, then Kill only if it stays), **Restart graphics**,
+**Sign out** and **Restart computer**. While the session is locked it offers
+only Return, Restart graphics and Restart computer; if the compositor is
+frozen it uses the last lock state it saw and fails closed. It never offers
+a shell and only signals the desktop user's own processes.
+
+Restart graphics rebuilds Hyprland's renderer when Hyprland still answers. When
+it does not, it triggers the AMD driver's GPU reset on the GPU driving the
+display (`amdgpu_gpu_recover`); other GPUs report that reset is unsupported.
+On the AMD iGPU it was tested on, the reset took under a second and Hyprland
+and every open app survived; other GPUs may lose apps, which still beats
+holding the power button. If the screen stays black, the keys still work blind:
+Ctrl+Alt+Shift+Esc, then **3**.
+
+Install or remove it from a checkout (needs root; Orbit's marketplace install
+never elevates):
+
+```bash
+sudo ./rescue/install.sh            # install and start
+sudo ./rescue/install.sh --remove   # stop and remove
+sudo python3 -I /usr/local/lib/orbit-rescue/orbit_rescue.py status
+```
+
+It installs `/usr/local/lib/orbit-rescue/orbit_rescue.py` and two systemd units
+and needs only Python 3. Keyboards are observed, never grabbed, stored or
+logged. Reload Hyprland afterwards so Orbit keeps both chords from also reaching
+the focused app. A true kernel lockup still needs a reboot.
+
+See [0.10.0 release notes](docs/RELEASE-0.10.0.md) for this update.

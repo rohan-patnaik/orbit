@@ -37,7 +37,7 @@ function overlay(overrides = {}) {
       { id: 1, name: 'HDMI-A-1', x: 0, y: 0, activeWorkspace: { id: 1 } }
     ] }, focusedWorkspace: { id: 2 }, focusedMonitor: { id: 0, name: 'eDP-1' },
       toplevels: { values: [] }, dispatch: command => calls.push(command) },
-    windowQuery: {}, snapActiveQuery: {}, snapMonitorQuery: {}, snapClientsQuery: {}, settingsReload: {}, mediaExitRestore: {}, activationDispatch: {}, activationReadinessQuery: {},
+    windowQuery: {}, nativeReleaseCheck: {}, snapActiveQuery: {}, snapMonitorQuery: {}, snapClientsQuery: {}, settingsReload: {}, mediaExitRestore: {}, activationDispatch: {}, activationReadinessQuery: {},
     watchdog: timer(), dragWatchdog: timer(), snapAnimationRelease: timer(), snapFocusTimer: timer(), pickerPresentationTimer: timer(),
     activationCommitTimer: timer(), activationSettleTimer: timer(), activationRevealTimer: timer(), activationFinalizeTimer: timer(),
     dragLayer: { item: null }, switcherLayer: { item: null },

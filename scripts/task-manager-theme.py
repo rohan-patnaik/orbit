@@ -9,7 +9,7 @@ import tempfile
 
 REQUIRED = ('background', 'foreground', 'dark_background', 'lighter_background',
             'bright_foreground', 'muted', 'accent', 'selection')
-OPTIONAL = ('darker_background', 'selection_foreground')
+OPTIONAL = ('darker_background', 'selection_foreground', 'red')
 HEX = re.compile(r'#[0-9a-fA-F]{6}')
 
 # Adwaita keeps widget geometry, icons and dialog layout; only colours, spacing,
@@ -34,6 +34,7 @@ TEMPLATE = '''/* Generated from the current Omarchy palette. Task Manager only. 
 @define-color tm_grid alpha(FOREGROUND, 0.12);
 @define-color tm_hover alpha(ACCENT, 0.12);
 @define-color tm_on_accent BACKGROUND;
+@define-color tm_danger DANGER;
 
 /* Adwaita named colours */
 @define-color theme_bg_color @tm_bg;
@@ -197,19 +198,43 @@ button:disabled, button:disabled:backdrop {
 button.suggested-action, button.default {
   background-color: @tm_accent; color: @tm_on_accent; border-color: @tm_accent;
 }
-messagedialog, messagedialog .titlebar, messagedialog.csd .titlebar, dialog, dialog .titlebar {
-  background-color: @tm_bg; color: @tm_fg; border: none; box-shadow: none;
+/* Confirmation dialogs: a raised panel, clearly separate from the process list.
+   GTK's Yes/No message dialogs order No before Yes, and every Task Manager
+   message dialog confirms a signal, so the last action is the destructive one. */
+messagedialog, messagedialog.background, messagedialog:backdrop {
+  background-color: @tm_surface; color: @tm_fg;
 }
+messagedialog .titlebar, messagedialog.csd .titlebar, messagedialog headerbar,
+messagedialog headerbar:backdrop {
+  background-image: none; background-color: @tm_surface; color: @tm_dim;
+  border: none; box-shadow: none; min-height: 28px;
+}
+messagedialog.csd decoration, messagedialog.csd decoration:backdrop {
+  border-radius: 0; border: 1px solid @tm_line; box-shadow: none; margin: 0;
+}
+messagedialog.csd.background,
+messagedialog.csd .dialog-action-area button:first-child,
+messagedialog.csd .dialog-action-area button:last-child { border-radius: 0; }
+messagedialog box.vertical { background-color: transparent; }
+messagedialog label.title { color: @tm_strong; font-weight: 700; }
+messagedialog .dialog-action-area { border-top: 1px solid @tm_line; }
 messagedialog .dialog-action-area button, messagedialog.csd .dialog-action-area button {
-  border-radius: 0; border-style: solid none none solid; border-color: @tm_line;
-  padding: 10px 16px; background-color: @tm_bg; color: @tm_fg;
+  border-radius: 0; border-style: none none none solid; border-color: @tm_line;
+  padding: 10px 16px; background-image: none; background-color: @tm_surface; color: @tm_fg;
   outline-style: solid; outline-width: 1px; outline-offset: -4px; -gtk-outline-radius: 4px;
 }
 messagedialog .dialog-action-area button:first-child { border-left-style: none; }
 messagedialog .dialog-action-area button:hover { background-color: @tm_hover; color: @tm_strong; }
-messagedialog .dialog-action-area button:active { background-color: @tm_selected; }
 messagedialog .dialog-action-area button:focus { color: @tm_accent; }
-messagedialog label.title { color: @tm_strong; }
+messagedialog .dialog-action-area button:last-child { color: @tm_danger; font-weight: 700; }
+messagedialog .dialog-action-area button:last-child:hover,
+messagedialog .dialog-action-area button:last-child:focus {
+  background-color: @tm_danger; color: @tm_on_accent;
+}
+messagedialog .dialog-action-area button:active { background-color: @tm_selected; }
+dialog, dialog.background, dialog .titlebar {
+  background-color: @tm_bg; color: @tm_fg; border: none; box-shadow: none;
+}
 
 /* Settings dialog widgets */
 notebook > header { background-color: @tm_surface; border-color: @tm_line; }
@@ -278,11 +303,13 @@ def render(palette):
     surface = nearest(palette, raised) or mix(palette['background'], palette['foreground'], 0.07)
     field = nearest(palette, sunken) or palette['background']
     values = dict(palette, surface=surface, field=field,
-                  selection_foreground=palette.get('selection_foreground', palette['bright_foreground']))
+                  selection_foreground=palette.get('selection_foreground', palette['bright_foreground']),
+                  danger=palette.get('red', '#c74b50'))
     css = TEMPLATE.replace('BASE', base)
     # Longest first so BACKGROUND never corrupts DARK_BACKGROUND, etc.
     for key in sorted(REQUIRED + ('surface', 'field', 'selection_foreground'), key=len, reverse=True):
         css = css.replace(key.upper(), values[key])
+    css = css.replace('DANGER', values['danger'])
     return css
 
 

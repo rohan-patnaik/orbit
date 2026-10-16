@@ -1,0 +1,16 @@
+[Unit]
+Description=Orbit rescue console
+Documentation=https://github.com/rohan-patnaik/orbit#rescue-keys
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/lib/orbit-rescue/orbit_rescue.py console
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty9
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Nice=-10
+OOMScoreAdjust=-1000

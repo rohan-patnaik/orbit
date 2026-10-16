@@ -96,6 +96,112 @@ o.window({ class = "^[Xx]fce4-taskmanager$", float = false }, {
   center = true,
 })
 
+-- Some configs pin every new window to one workspace (for example a static
+-- `workspace = "1 silent"` rule). Task Manager and its confirmation dialogs
+-- must still appear where the user is: beside an existing Task Manager window,
+-- otherwise on the focused workspace, raised and focused so Enter/Esc work.
+--
+-- Its Settings and confirmation dialogs are modal, but GTK3 does not tell the
+-- compositor, so clicking the main window would bury a dialog that still owns
+-- input. Like Windows, keep the newest open dialog above its Task Manager.
+local function orbit_is_task_manager(window)
+  return window ~= nil and type(window.class) == "string"
+    and window.class:lower() == "xfce4-taskmanager"
+end
+
+local function orbit_workspace_selector(workspace)
+  if workspace == nil or workspace.special then
+    return nil
+  end
+  if workspace.id and workspace.id > 0 then
+    return tostring(workspace.id)
+  end
+  return "name:" .. workspace.name
+end
+
+orbit_task_manager_dialogs = orbit_task_manager_dialogs or {}
+orbit_task_manager_dialog_serial = orbit_task_manager_dialog_serial or 0
+
+local function orbit_raise(window)
+  local address = "address:" .. window.address
+  hl.dispatch(hl.dsp.focus({ window = address }))
+  hl.dispatch(hl.dsp.window.alter_zorder({ mode = "top", window = address }))
+end
+
+function orbit_place_task_manager(window)
+  if not orbit_is_task_manager(window) then
+    return
+  end
+  local target = nil
+  for _, other in ipairs(hl.get_windows()) do
+    if other.address ~= window.address and other.pid == window.pid
+      and other.mapped and orbit_is_task_manager(other) then
+      target = other.workspace
+      break
+    end
+  end
+  if target then
+    orbit_task_manager_dialog_serial = orbit_task_manager_dialog_serial + 1
+    orbit_task_manager_dialogs[window.address] = orbit_task_manager_dialog_serial
+  end
+  target = target or hl.get_active_workspace()
+  local selector = orbit_workspace_selector(target)
+  if selector and (window.workspace == nil or window.workspace.id ~= target.id) then
+    hl.dispatch(hl.dsp.window.move({
+      workspace = selector, follow = false, window = "address:" .. window.address,
+    }))
+  end
+  orbit_raise(window)
+end
+
+function orbit_keep_task_manager_dialog_on_top(window)
+  if not orbit_is_task_manager(window) or orbit_task_manager_dialogs[window.address] then
+    return
+  end
+  local dialog, newest = nil, 0
+  for _, other in ipairs(hl.get_windows()) do
+    local serial = orbit_task_manager_dialogs[other.address]
+    if serial and serial > newest and other.pid == window.pid and other.mapped then
+      dialog, newest = other, serial
+    end
+  end
+  if dialog == nil then
+    return
+  end
+  -- Raise after the click that activated the main window has been handled;
+  -- focusing synchronously here is undone by that same click.
+  local address = dialog.address
+  orbit_task_manager_raise_timer = hl.timer(function()
+    for _, other in ipairs(hl.get_windows()) do
+      if other.address == address and other.mapped and orbit_task_manager_dialogs[address] then
+        orbit_raise(other)
+        return
+      end
+    end
+  end, { timeout = 50, type = "oneshot" })
+end
+
+function orbit_forget_task_manager_dialog(window)
+  if window ~= nil and window.address ~= nil then
+    orbit_task_manager_dialogs[window.address] = nil
+  end
+end
+
+for _, subscription in ipairs(orbit_task_manager_subscriptions or {}) do
+  if subscription:is_active() then
+    subscription:remove()
+  end
+end
+if orbit_task_manager_subscription and orbit_task_manager_subscription:is_active() then
+  orbit_task_manager_subscription:remove()
+end
+orbit_task_manager_subscription = nil
+orbit_task_manager_subscriptions = {
+  hl.on("window.open", orbit_place_task_manager),
+  hl.on("window.active", orbit_keep_task_manager_dialog_on_top),
+  hl.on("window.close", orbit_forget_task_manager_dialog),
+}
+
 hl.unbind("ALT + TAB")
 hl.unbind("ALT + SHIFT + TAB")
 
@@ -150,3 +256,29 @@ o.bind("CTRL + SHIFT + ESCAPE", "Task Manager", "python3 " .. o.shell_quote(
   (os.getenv("XDG_CONFIG_HOME") or ((os.getenv("HOME") or "") .. "/.config"))
     .. "/omarchy/plugins/" .. orbit_plugin_id .. "/scripts/task-manager.py"
 ))
+
+-- Windows opens a list's context menu with Shift+F10 as well as the Menu key.
+-- Xfce Task Manager only listens for Menu, so add it there without consuming
+-- Shift+F10 for any other app.
+hl.unbind("SHIFT + F10")
+o.bind("SHIFT + F10", "Task Manager row menu", function()
+  if not orbit_is_task_manager(hl.get_active_window()) then
+    return
+  end
+  hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "Menu", state = "down" }))
+  hl.timer(function()
+    hl.dispatch(hl.dsp.send_key_state({ mods = "", key = "Menu", state = "up" }))
+  end, { timeout = 50, type = "oneshot" })
+end, { non_consuming = true })
+
+-- Orbit's optional rescue service (rescue/install.sh) reads these chords below
+-- the compositor so they work even when it is frozen. While Hyprland is alive,
+-- keep them from also reaching the focused app.
+local orbit_rescue_module = io.open("/usr/local/lib/orbit-rescue/orbit_rescue.py", "r")
+if orbit_rescue_module then
+  orbit_rescue_module:close()
+  hl.unbind("CTRL + ALT + SHIFT + ESCAPE")
+  o.bind("CTRL + ALT + SHIFT + ESCAPE", "Rescue screen", function() end)
+  hl.unbind("SUPER + CTRL + SHIFT + B")
+  o.bind("SUPER + CTRL + SHIFT + B", "Restart graphics", function() end)
+end

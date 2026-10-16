@@ -1,0 +1,18 @@
+[Unit]
+Description=Orbit rescue keys (Ctrl+Alt+Shift+Esc, Super+Ctrl+Shift+B)
+Documentation=https://github.com/rohan-patnaik/orbit#rescue-keys
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/lib/orbit-rescue/orbit_rescue.py daemon
+Restart=always
+RestartSec=1
+# Keep answering when memory or CPU pressure is what froze the desktop.
+Nice=-10
+OOMScoreAdjust=-1000
+RuntimeDirectory=orbit-rescue
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
