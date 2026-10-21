@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.rohan-patnaik.window-switcher",
   "name": "Orbit",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "author": "Rohan Patnaik",
   "license": "MIT",
   "description": "A toggleable application dock, themed Task Manager, three visual Alt+Tab views, Snap Layouts and desktop controls for Omarchy.",

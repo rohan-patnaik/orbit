@@ -13,7 +13,7 @@ SOURCE := orbit_drag.cpp
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCE) DragTracker.hpp
+$(TARGET): $(SOURCE) DragTracker.hpp XwaylandMove.hpp
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(INCLUDES) $< -o $@
 
 clean:

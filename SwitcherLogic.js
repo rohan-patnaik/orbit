@@ -38,7 +38,20 @@ function fullscreenHandoffPlan(sourceInternalState, targetInternalState, targetD
 
 function needsHandoffCover(source, target, remembered, modes) {
   if (!source || !target || source.address === target.address || !sameWorkspace(source, target)) return false
-  return fullscreenState(target.fullscreenState) !== desiredWindowState(target, remembered, modes)
+  var desired = desiredWindowState(target, remembered, modes)
+  if (fullscreenState(target.fullscreenState) === desired) return false
+  // Monocle (and other full-work-area layouts) can retain maximized geometry
+  // without retaining the compositor's fullscreen flag. Switching that flag
+  // does not resize the surface: a frozen cover and resize wait only add lag.
+  // Use live geometry, never retained thumbnail dimensions, and only infer a
+  // work area from a tiled maximized source on the same workspace/monitor.
+  if (desired === 1 && fullscreenState(source.fullscreenState) === 1
+      && !source.floating && !target.floating && source.monitorId === target.monitorId
+      && source.previewWidth > 0 && source.previewHeight > 0
+      && !dimensionsDiffer(source.previewWidth, source.previewHeight, target.previewWidth, target.previewHeight, 0)
+      && Number.isFinite(source.positionX) && Number.isFinite(source.positionY)
+      && source.positionX === target.positionX && source.positionY === target.positionY) return false
+  return true
 }
 
 function dimensionsDiffer(firstWidth, firstHeight, secondWidth, secondHeight, tolerance) {
@@ -80,6 +93,10 @@ function isEligibleWindow(ipc, workspaceId, monitorName, monitorId, scope,
     visibleWorkspaceIds, visibleMonitorNames, visibleMonitorIds,
     activeWorkspaceId, activeMonitorName, activeMonitorId) {
   if (!ipc || ipc.mapped === false) return false
+  // Wispr is deliberately tray-only; its shortcut and recording pill stay active.
+  if ([ipc.class, ipc.initialClass].some(function(value) {
+    return String(value || "").toLowerCase() === "wispr-flow"
+  })) return false
   var normalizedScope = normalizeScope(scope)
   var minimized = taskbarMinimizedState(ipc)
   var workspace = minimized ? minimized.workspaceId : Number(workspaceId)
@@ -536,9 +553,14 @@ function activationScript(sourceValue, targetValue, desiredState, restoreFirst, 
     + 'local function state(w, mode) if w and w.mapped and w.fullscreen ~= mode then '
     + 'local client = w.fullscreen_client; if mode == 1 and client == 0 then client = 1 end; '
     + 'hl.dispatch(hl.dsp.window.fullscreen_state({internal=mode,client=client,action="set",window=w})) end end; '
+  // Monocle must select/unhide its target before fullscreen stops its layout
+  // recalculation. This also handles a destination on another monitor: the
+  // source is not necessarily that workspace's covering window.
+  script += 'local monocle = t.workspace and t.workspace.tiled_layout == "monocle" and not t.floating; '
+    + 'if monocle then local covering = t.workspace.fullscreen_window; if covering and (covering.address ~= t.address or not t.visible) then state(covering,0) end end; '
   if (source && source !== target)
     script += 'local s = hl.get_window("address:' + source + '"); if s and s.workspace and t.workspace and s.workspace.id == t.workspace.id then state(s,0) end; '
-  if (desired > 0 && restoreFirst) script += 'state(t,' + desired + '); '
+  if (desired > 0 && restoreFirst) script += 'if not monocle then state(t,' + desired + ') end; '
   for (var i = 0; companions && i < companions.length; i++) {
     var member = safeAddress(companions[i])
     if (member && member !== target)
@@ -548,6 +570,7 @@ function activationScript(sourceValue, targetValue, desiredState, restoreFirst, 
   if (group > 0) script += 'hl.dispatch(hl.dsp.group.active({window=t,index=' + group + '})); '
   script += 'hl.dispatch(hl.dsp.focus({window=t})); '
   if (desired > 0 && !restoreFirst) script += 'state(t,' + desired + '); '
+  if (desired > 0 && restoreFirst) script += 'if monocle then state(t,' + desired + ') end; '
   return script + 'hl.dispatch(hl.dsp.window.alter_zorder({mode="top",window=t}))'
 }
 
@@ -574,7 +597,57 @@ function previewAspect(width, height) {
   var h = Number(height)
   if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0)
     return 16 / 9
-  return Math.max(0.25, Math.min(5, w / h))
+  return w / h
+}
+
+function previewDimensions(window) {
+  var snapshot = window && window.previewSnapshot
+  return snapshot || { width: window ? window.previewWidth : 16,
+    height: window ? window.previewHeight : 9 }
+}
+
+function previewCaptureSize(width, height) {
+  var aspect = previewAspect(width, height)
+  var h = Math.min(400, 640 / aspect, Number(height) || 400)
+  return { width: Math.max(1, Math.round(h * aspect)), height: Math.max(1, Math.round(h)) }
+}
+
+function restoredPreview(window, snapshot) {
+  // Only Orbit's temporary layout demotion may use an older image. A real
+  // mode change, move, new window at a reused address, or manual snap must
+  // immediately use the new live geometry instead.
+  if (!window || !snapshot
+      || (window.floating === true) !== snapshot.floating
+      || (window.pinned === true) !== snapshot.pinned
+      || fullscreenState(window.fullscreenState) !== 0
+      || fullscreenState(window.clientFullscreenState) !== snapshot.mode
+      || window.previewIdentity !== snapshot.identity
+      || window.previewMonitorKey !== snapshot.monitorKey
+      || window.workspaceId !== snapshot.workspaceId
+      || window.monitorId !== snapshot.monitorId) return null
+  return { url: snapshot.capture.url, width: snapshot.width, height: snapshot.height }
+}
+
+function rememberPreview(snapshots, window, capture, width, height, limit) {
+  var mode = window ? fullscreenState(window.fullscreenState) : 0
+  if (!mode || !capture || !capture.url
+      || !(width > 0 && height > 0)) return snapshots
+  // An asynchronous capture can arrive after the compositor resized the
+  // source. Never replace a good full-window image with that narrow tile.
+  var expected = previewAspect(window.previewWidth, window.previewHeight)
+  if (Math.abs(width / height / expected - 1) > 0.01) return snapshots
+  var next = {}
+  var keys = Object.keys(snapshots || {}).filter(function(address) { return address !== window.address })
+  var maximum = Math.max(1, Number(limit) || 24)
+  for (var i = Math.max(0, keys.length - maximum + 1); i < keys.length; i++)
+    next[keys[i]] = snapshots[keys[i]]
+  next[window.address] = {
+    capture: capture, width: width, height: height, mode: mode,
+    identity: window.previewIdentity, monitorKey: window.previewMonitorKey,
+    floating: window.floating === true, pinned: window.pinned === true,
+    workspaceId: window.workspaceId, monitorId: window.monitorId
+  }
+  return next
 }
 
 function rowPartitions(length, rowCount) {
@@ -609,7 +682,8 @@ function aspectGridLayout(rows, availableWidth, availableHeight, spacing,
   var fixedHeight = Math.max(0, Number(fixedCardHeight) || 0)
   var previewCap = Math.max(1, Number(maximumPreviewHeight) || 1)
   var aspects = source.map(function(row) {
-    return previewAspect(row.previewWidth, row.previewHeight)
+    var dimensions = previewDimensions(row)
+    return previewAspect(dimensions.width, dimensions.height)
   })
 
   var best = null
@@ -773,6 +847,7 @@ function flipOffset(index, selectedIndex, length, maximumVisible) {
 function isBrowserAppClass(value) {
   return /^(chrome|chromium|brave|msedge|vivaldi|opera|helium)-/.test(String(value || "").toLowerCase())
 }
+
 
 function webAppDesktopEntry(aliases, applications) {
   var values = Array.isArray(aliases) ? aliases : []

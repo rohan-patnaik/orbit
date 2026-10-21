@@ -152,6 +152,34 @@ test('quick fullscreen restore retains its capture even without presenting a pic
   assert.equal(root.handoffNeedsCover, true);
 });
 
+test('full-work-area handoff skips the resize cover but retains native maximize and focus', () => {
+  const modes = { ...logic.defaultWindowModes(), maximizeOnSwitch: true };
+  const source = { address: '0xa', workspaceId: 1, monitorId: 1, fullscreenState: 1,
+    previewWidth: 1896, previewHeight: 1019, positionX: 12, positionY: 12, floating: false };
+  const target = { ...source, address: '0xb', fullscreenState: 0, clientFullscreenState: 1 };
+  const { root, env } = overlay({ windowModes: modes });
+  root.prepareFullscreenHandoff(source, target);
+  assert.equal(root.handoffNeedsCover, false);
+  assert.equal(root.pendingFullscreenRelease.address, source.address);
+  assert.equal(root.pendingFullscreenRestore.internal, 1);
+  root.pendingWindow = target;
+  root.requestPendingActivation();
+  assert.ok(env.activationDispatch.command[2].includes('state(t,1)'));
+  assert.ok(env.activationDispatch.command[2].includes('hl.dsp.focus({window=t})'));
+
+  // A retained full-size thumbnail is not evidence that the live surface fits.
+  for (const changed of [
+    { previewWidth: 941, previewSnapshot: { width: 1896, height: 1019 } },
+    { previewHeight: 502 }, { positionX: 967 }, { floating: true },
+    { clientFullscreenState: 2 },
+  ]) {
+    root.prepareFullscreenHandoff(source, { ...target, ...changed });
+    assert.equal(root.handoffNeedsCover, true, JSON.stringify(changed));
+  }
+  root.prepareFullscreenHandoff({ ...source, fullscreenState: 2 }, target);
+  assert.equal(root.handoffNeedsCover, true, 'fullscreen is not a work-area reference');
+});
+
 test('focus readiness is requested after dispatch, never ahead of the activation transaction', () => {
   const { root, env } = overlay({ activationCommitInProgress: true, pendingWindow: { address: '0xb' }, activationGeneration: 7 });
   root.requestActivationReadiness();

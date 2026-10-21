@@ -292,6 +292,31 @@ test('activation Lua is idempotent and preserves source client state on every re
   }
 });
 
+test('monocle unhides before maximizing, including a hidden covering target on another monitor', () => {
+  const {execFileSync}=require('node:child_process');
+  for (const cross of [false,true]) {
+    const script=logic.activationScript('0xa','0xb',1,true,0,[]);
+    const lua=`local ws={id=1,tiled_layout="monocle"};
+      local s={address="0xa",mapped=true,workspace=${cross?'{}':'ws'},fullscreen=1,fullscreen_client=1,visible=true};
+      local t={address="0xb",mapped=true,workspace=ws,fullscreen=${cross?1:0},fullscreen_client=1,visible=false};
+      ws.fullscreen_window=${cross?'t':'s'}; local changes=0; local active=s;
+      hl={get_window=function(a)return a=="address:0xa" and s or t end,dispatch=function(f)f()end,dsp={window={}}};
+      hl.dsp.window.fullscreen_state=function(v)return function()
+        if v.window==t and v.internal==1 then assert(t.visible,"maximized before monocle focus") end;
+        v.window.fullscreen=v.internal; changes=changes+1;
+        if v.window.workspace==ws then ws.fullscreen_window=v.internal>0 and v.window or nil end;
+      end end;
+      hl.dsp.focus=function(v)return function()
+        assert(not ws.fullscreen_window or ws.fullscreen_window==t,"destination still covered");
+        active=v.window;t.visible=true;
+      end end;
+      hl.dsp.window.alter_zorder=function(v)return function()end end;
+      ${script}; assert(active==t and t.visible and t.fullscreen==1);
+      local before=changes; ${script}; assert(changes==before,"repeat resized the visible target");`;
+    execFileSync('lua',['-'],{input:lua});
+  }
+});
+
 test('wrapping to the original window cannot reuse an earlier handoff mode', () => {
   const {root}=overlay({lastHandoff:{desired:1}});
   const window={address:'0xa',fullscreenState:2,clientFullscreenState:2};

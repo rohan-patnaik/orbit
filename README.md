@@ -41,9 +41,27 @@ Orbit also adds a Windows-inspired desktop layout layer:
   complete implementation of Windows Snap Groups.
 
 Grid and Flip use bounded, one-frame Quickshell window captures. Grid sizes cards
-from the source aspect ratios to avoid artificial padding while keeping the whole
-window visible. Letterboxing produced inside an app or video is retained. Captures are released when the
-overlay closes and are never written to disk or sent over the network. Icons are
+from the source aspect ratios while keeping the whole window visible. Both views
+fit images proportionally, including portrait and ultrawide windows. Letterboxing
+produced inside an app or video is retained.
+
+Hyprland temporarily returns a maximized/fullscreen window to its underlying tile
+when Orbit switches away on the same workspace. Orbit keeps a small image of that
+window before the handoff and reuses its image **and dimensions** while the window
+awaits restoration. This prevents hidden Firefox or T3 Code windows from becoming
+narrow previews. Visible windows and intentional tiled, floating or snapped layouts
+use fresh captures; changing mode, workspace, monitor, display size/scale or window
+identity invalidates the saved preview. Explicit fullscreen on a floating window
+can retain its preview too.
+
+The cache holds at most 24 images, each fitting within 640×400 pixels (at most
+24.6 MB of RGBA image data, excluding Qt/GPU overhead). Closing a window releases its
+saved image. Full-resolution capture buffers are released when the overlay closes.
+Images stay in memory and are never written to disk or sent over the network.
+After a shell restart or cache eviction, an already hidden window initially uses
+its available live capture; its full preview becomes available after it is shown
+and captured on a subsequent Orbit switch. Orbit does not resize or activate
+background apps merely to manufacture thumbnails. Icons are
 resolved from installed desktop entries and the local icon theme; Orbit does not
 download icons. Icons mode chooses a light or dark backplate from the actual icon
 pixels, including themed image-provider icons. A monogram is used when the icon is
@@ -51,7 +69,8 @@ missing or fails to load.
 
 Orbit reduces work on the switching path: ordinary switches
 use a 16 ms initial unmap timer, then advance as soon as the compositor confirms
-focus. Resize handoffs retain their 40 ms capture head start and 80 ms rendering
+focus. A maximized/fullscreen source also gets a 40 ms capture head start to retain
+its preview. Resize handoffs retain their 40 ms capture head start and 80 ms rendering
 guard. These are configured waits, not measured end-to-end latency guarantees.
 Native Alt holds need no modifier-polling processes; unloading the bridge restores
 the fallback. Native gestures wait 75 ms after the window query before presenting
@@ -150,14 +169,14 @@ For native titlebar/top-edge drag integration, build the small Hyprland bridge
 against the compositor currently installed on the machine, then load it:
 
 ```bash
-bash ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/build-native.sh
-hyprctl plugin load ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/native/orbit-drag.so
+bridge="$(bash ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/build-native.sh)"
+hyprctl plugin load "$bridge"
 hyprctl plugin list
 ```
 
 Hyprland plugins run inside the compositor and have no stable ABI. Orbit checks
 the Hyprland build hash at load time and refuses a mismatch; the build helper
-also reports the compositor's full ABI string. Rebuild this bridge after each
+also verifies the compositor's full ABI string, source hash and binary receipt. Rebuild this bridge after each
 Hyprland upgrade. Omarchy's marketplace installer intentionally never executes
 install hooks, so marketplace updates do not compile it automatically; Super+Z,
 Snap Assist, Snap Groups, and core Alt+Tab behavior work without the bridge. Live drag
@@ -272,7 +291,8 @@ mode preferences continue to work after the public rename.
 If the native bridge is loaded, unload it before removing Orbit:
 
 ```bash
-hyprctl plugin unload ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/native/orbit-drag.so
+bridge="$(bash ~/.config/omarchy/plugins/io.github.rohan-patnaik.window-switcher/scripts/build-native.sh --locate)"
+hyprctl plugin unload "$bridge"
 ```
 
 ### Window scope
@@ -493,3 +513,42 @@ logged. Reload Hyprland afterwards so Orbit keeps both chords from also reaching
 the focused app. A true kernel lockup still needs a reboot.
 
 See [0.10.0 release notes](docs/RELEASE-0.10.0.md) for this update.
+
+
+## Guarded XWayland title-bar drag
+
+Orbit 0.10.1 includes the previously local native adapter. Hyprland
+0.56.2 advertises `_NET_WM_MOVERESIZE` without handling it; Chromium/Electron
+and Qt XWayland title bars therefore cannot start native monitor drags. The
+bridge routes pointer-move requests for the exact focused, mapped, visible,
+input-accepting XWayland window to the native drag controller. It requires a
+held left button, pointer inside the live window and an ordinary visible
+workspace; locks, exclusive layers, existing drags, hidden automation windows,
+keyboard moves and unrelated messages remain outside this path. Cancellation
+ends only the bridge's own current drag. Live objects and weak ownership avoid
+stale XIDs/window addresses. Message coordinates are ignored in favor of the
+compositor's logical cursor coordinates on mixed-scale monitors.
+
+Do not clear XWayland pointer focus at drag start: that synthesizes a release
+and Qt immediately cancels its move. Ordinary native drag processing retains
+release/retile, Orbit snap sampling and Wayland title-bar behavior.
+
+The function hook is enabled only for the inspected Hyprland source revision
+`efb50993780079460b0cbed1363e2166a2de1d9f`, after the full ABI check and exact
+unambiguous symbol lookup. New compositor revisions keep ordinary Orbit
+features but report `xwaylandMoveSupported:false` until their upstream handler
+is reviewed. Retire this adapter when upstream implements the protocol.
+`hyprctl orbit-drag-status` reports support and accepted `xwaylandMoves`.
+
+The build helper stores binary, scratch, receipt and startup log beneath the
+mounted artifact drive's `Artifacts/orbit-native/`. It refuses missing,
+read-only, autofs-only, escaped/symlink paths, mismatching headers and less than
+256 MB free; it never writes a new .so to the source tree. Override storage for
+another PC with `ORBIT_ARTIFACT_DRIVE`/`ORBIT_ARTIFACT_ROOT` within its real
+artifact mount. The build helper reuses only a verified source/ABI/SHA-256 receipt.
+The optional source-PC login loader is maintained separately in Oma; normal
+Orbit installation does not automatically build or load native code. No
+application or compositor restart is required to load a reviewed bridge.
+
+
+See [0.10.1 release notes](docs/RELEASE-0.10.1.md) for source/deployment parity.

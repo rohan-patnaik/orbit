@@ -13,3 +13,13 @@ test("compositor gesture lifecycle rejects non-moves and handles release/cancel/
     execFileSync(binary);
   } finally { fs.rmSync(dir, { recursive: true }); }
 });
+
+
+test("XWayland pointer moves require a real focused visible-window gesture", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "orbit-xwayland-test-"));
+  try {
+    const binary = path.join(dir, "xwayland-move");
+    execFileSync("c++", ["-std=c++20", "-Wall", "-Wextra", "-Werror", path.join(__dirname, "xwayland-move.cpp"), "-o", binary]);
+    execFileSync(binary);
+  } finally { fs.rmSync(dir, { recursive: true }); }
+});

@@ -1,6 +1,7 @@
 #define WLR_USE_UNSTABLE
 
 #include "DragTracker.hpp"
+#include "XwaylandMove.hpp"
 #include <linux/input-event-codes.h>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
@@ -18,6 +19,10 @@
 #include <hyprland/src/protocols/XDGShell.hpp>
 #include <hyprland/src/state/MonitorState.hpp>
 #include <hyprland/src/helpers/MiscFunctions.hpp>
+#include <hyprland/src/managers/SessionLockManager.hpp>
+#include <hyprland/src/xwayland/XWM.hpp>
+#include <hyprland/src/xwayland/XSurface.hpp>
+#include <hyprland/src/xwayland/XWayland.hpp>
 #include <chrono>
 #include <stdexcept>
 
@@ -37,6 +42,76 @@ uint64_t updates = 0, releases = 0, cancels = 0;
 bool sampleScheduled = false;
 unsigned heldAltKeys = 0;
 bool nextFunctionRegistered = false, previousFunctionRegistered = false;
+CFunctionHook* clientMessageHook = nullptr;
+PHLWINDOWREF ownedXwaylandDrag;
+bool leftHeld = false;
+uint64_t xwaylandMoves = 0;
+void armSample();
+using ClientMessageHandler = void (*)(CXWM*, xcb_client_message_event_t*);
+
+void handleClientMessage(CXWM* xwm, xcb_client_message_event_t* e) {
+    const auto atom = HYPRATOMS.find("_NET_WM_MOVERESIZE");
+    if (e && atom != HYPRATOMS.end() && atom->second && e->type == atom->second && e->format == 32) {
+        const auto* controller = g_layoutManager->dragController().get();
+        const auto owned = ownedXwaylandDrag.lock();
+        if (e->data.data32[2] == 11 && owned && owned->m_xwaylandSurface
+            && owned->m_xwaylandSurface->m_xID == e->window && controller->target()
+            && controller->target()->window() == owned) {
+            g_layoutManager->endDragTarget();
+            ownedXwaylandDrag.reset();
+            return;
+        }
+        for (const auto& window : Desktop::viewState()->windows()) {
+            if (!window->m_isX11 || !window->m_xwaylandSurface || window->m_xwaylandSurface->m_xID != e->window)
+                continue;
+            const auto workspace = window->m_workspace;
+            const auto target = window->layoutTarget();
+            const Orbit::XwaylandMoveContext context{
+                leftHeld, g_pInputManager->hasHeldButtons(), g_pSessionLockManager->isSessionLocked(),
+                Desktop::View::validMapped(window) && bool(target),
+                window->visible() && !window->isHidden() && window->acceptsInput() && g_pInputManager->m_exclusiveLSes.empty(),
+                Desktop::focusState()->window() == window,
+                workspace && workspace->isVisible() && !workspace->m_isSpecialWorkspace && workspace->m_name != "codex-background",
+                target && target->position().containsPoint(Pointer::mgr()->position()), bool(controller->target())};
+            if (Orbit::acceptsXwaylandMove(e->format, e->data.data32[2], e->data.data32[3], context)) {
+                // Use the native pointer drag. Clearing XWayland pointer focus
+                // synthesizes a release and makes Qt cancel its system move.
+                g_layoutManager->beginDragTarget(target, MBIND_MOVE);
+                if (controller->target() == target) {
+                    ownedXwaylandDrag = window;
+                    ++xwaylandMoves;
+                    armSample();
+                }
+                return;
+            }
+            break;
+        }
+    }
+    // Preserve every unrelated message and rejected request.
+    reinterpret_cast<ClientMessageHandler>(clientMessageHook->m_original)(xwm, e);
+}
+
+void installXwaylandMoveHook() {
+    // Exact inspected source revision: future upstream may implement EWMH itself.
+    // Retain ordinary Orbit behavior on a new compositor until reviewed.
+    if (std::string(GIT_COMMIT_HASH) != "efb50993780079460b0cbed1363e2166a2de1d9f")
+        return;
+    const auto matches = HyprlandAPI::findFunctionsByName(PHANDLE, "handleClientMessage");
+    void* address = nullptr;
+    for (const auto& match : matches) {
+        if (match.demangled != "CXWM::handleClientMessage(xcb_client_message_event_t*)")
+            continue;
+        if (address)
+            throw std::runtime_error("Orbit XWayland move handler is ambiguous");
+        address = match.address;
+    }
+    if (!address)
+        throw std::runtime_error("Orbit XWayland move handler not found");
+    clientMessageHook = HyprlandAPI::createFunctionHook(PHANDLE, address, reinterpret_cast<void*>(handleClientMessage));
+    if (!clientMessageHook || !clientMessageHook->hook())
+        throw std::runtime_error("Orbit could not install XWayland title-bar move support");
+}
+
 
 int switchStep(int direction) {
     // Invoked by the normal Hyprland binding dispatcher, not a raw Tab hook:
@@ -101,6 +176,14 @@ void sample() {
 }
 
 void cleanup() {
+    if (const auto owned = ownedXwaylandDrag.lock(); owned && g_layoutManager
+        && g_layoutManager->dragController()->target() && g_layoutManager->dragController()->target()->window() == owned)
+        g_layoutManager->endDragTarget();
+    ownedXwaylandDrag.reset();
+    leftHeld = false;
+    if (clientMessageHook)
+        HyprlandAPI::removeFunctionHook(PHANDLE, clientMessageHook);
+    clientMessageHook = nullptr;
     if (nextFunctionRegistered)
         HyprlandAPI::removeLuaFunction(PHANDLE, "orbit", "next");
     if (previousFunctionRegistered)
@@ -147,8 +230,8 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         statusCommand = HyprlandAPI::registerHyprCtlCommand(handle, SHyprCtlCommand{
             .name = "orbit-drag-status", .exact = true,
             .fn = [](eHyprCtlOutputFormat, std::string) {
-                return std::format(R"({{"protocol":1,"session":{},"dragging":{},"updates":{},"releases":{},"cancels":{},"last":{{{}}}}})",
-                    tracker.session, tracker.active != 0, updates, releases, cancels, lastSample);
+                return std::format(R"({{"protocol":1,"session":{},"dragging":{},"updates":{},"releases":{},"cancels":{},"xwaylandMoveSupported":{},"xwaylandMoves":{},"last":{{{}}}}})",
+                    tracker.session, tracker.active != 0, updates, releases, cancels, clientMessageHook != nullptr, xwaylandMoves, lastSample);
             },
         });
         if (!statusCommand)
@@ -210,7 +293,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 armSample();
         });
         buttonListener = Event::bus()->m_events.input.mouse.button.listen([](IPointer::SButtonEvent e, Event::SCallbackInfo&) {
-            if (e.button != BTN_LEFT || e.state != WL_POINTER_BUTTON_STATE_RELEASED)
+            if (e.button != BTN_LEFT)
+                return;
+            leftHeld = e.state == WL_POINTER_BUTTON_STATE_PRESSED;
+            if (leftHeld)
                 return;
             const auto target = g_layoutManager->dragController()->target();
             if (tracker.active && target && Desktop::View::validMapped(target->window()))
@@ -241,11 +327,12 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
                 }
             }
         });
+        installXwaylandMoveHook();
     } catch (...) {
         cleanup();
         throw;
     }
-    return {"orbit-drag", "Live snap gestures and committed Wayland surface readiness.", "Rohan Patnaik", "0.6.1"};
+    return {"orbit-drag", "Live snap gestures, XWayland title-bar moves and surface readiness.", "Rohan Patnaik", "0.6.2"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() { cleanup(); }
